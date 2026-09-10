@@ -113,3 +113,20 @@ func TestCommandBarShape(t *testing.T) {
 		t.Errorf("프롬프트 = %q", got[2])
 	}
 }
+
+func TestCommandBarWithKeepsStatusAndCommands(t *testing.T) {
+	got := CommandBarWith("큐 12건 · 오프라인",
+		"주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)", "선택 >>", 70)
+	if len(got) != 3 {
+		t.Fatalf("3줄이어야 한다: %d", len(got))
+	}
+	if !strings.Contains(got[0], "오프라인") {
+		t.Errorf("상태가 구분선에 있어야 한다: %q", got[0])
+	}
+	if !strings.Contains(got[1], "종료(X)") {
+		t.Errorf("명령이 잘리면 안 된다: %q", got[1])
+	}
+	if Width(got[0]) != 70 {
+		t.Errorf("구분선 폭 = %d, 기대 70", Width(got[0]))
+	}
+}

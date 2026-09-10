@@ -49,9 +49,12 @@ func (t Token) IsContent() bool {
 	if t.IsSymbol() {
 		return false
 	}
+	// 일본어. 非自立(비자립) 형태소는 제외한다.
+	// 「〜ていた」의 「いる」, 「静かく」의 「く」 같은 것들인데,
+	// 문법의 일부이지 어휘가 아니다. 어휘 차이에 섞이면 노이즈가 된다.
 	switch t.POS {
 	case "名詞", "動詞", "形容詞", "副詞":
-		return true
+		return t.POS1 != "非自立" && t.POS1 != "接尾"
 	}
 	// 한국어. 복합 태그(VV+EC)는 첫 성분으로 판단한다.
 	head := t.POS

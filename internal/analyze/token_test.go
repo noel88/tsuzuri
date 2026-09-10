@@ -146,3 +146,27 @@ func surfaces(ts []Token) []string {
 	}
 	return out
 }
+
+func TestJapaneseNonIndependentIsNotContent(t *testing.T) {
+	// 「座っていた」의 「い」(いる)는 動詞/非自立다.
+	// 〜ていた 문법의 일부이므로 어휘 비교에 넣으면 노이즈가 된다.
+	tokens := jaTok(t).Tokenize("長く座っていた")
+	for _, tk := range tokens {
+		if tk.POS1 == "非自立" && tk.IsContent() {
+			t.Errorf("非自立 「%s」(%s/%s)가 내용어로 분류됐다", tk.Surface, tk.POS, tk.POS1)
+		}
+	}
+	// 자립어는 그대로 내용어여야 한다.
+	var sawJiritsu bool
+	for _, tk := range tokens {
+		if tk.Base == "長い" || tk.Base == "座る" {
+			sawJiritsu = true
+			if !tk.IsContent() {
+				t.Errorf("자립어 「%s」가 내용어가 아니다", tk.Surface)
+			}
+		}
+	}
+	if !sawJiritsu {
+		t.Errorf("자립어를 못 찾았다: %v", bases(tokens))
+	}
+}
