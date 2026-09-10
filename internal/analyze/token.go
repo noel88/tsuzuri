@@ -60,11 +60,11 @@ func (t Token) IsContent() bool {
 	}
 	switch {
 	case strings.HasPrefix(head, "NN"), // 명사류
-		strings.HasPrefix(head, "VV"), // 동사
-		strings.HasPrefix(head, "VA"), // 형용사
-		strings.HasPrefix(head, "VX"), // 보조용언
+		strings.HasPrefix(head, "VV"),  // 동사
+		strings.HasPrefix(head, "VA"),  // 형용사
+		strings.HasPrefix(head, "VX"),  // 보조용언
 		strings.HasPrefix(head, "MAG"), // 일반부사
-		head == "XR": // 어근 (「조용」해서의 「조용」)
+		head == "XR":                   // 어근 (「조용」해서의 「조용」)
 		return true
 	}
 	return false

@@ -7,13 +7,13 @@ import (
 
 func TestWidthCountsCJKAsTwo(t *testing.T) {
 	cases := map[string]int{
-		"":       0,
-		"abc":    3,
-		"일상":     4,  // 한글 2자 = 4칸
-		"初めて":    6,  // 한자1 + 가나2 = 6칸
-		"p047":   4,
-		"「静かく」":  10, // 괄호도 전각이다
-		"a일b":    4,
+		"":      0,
+		"abc":   3,
+		"일상":    4, // 한글 2자 = 4칸
+		"初めて":   6, // 한자1 + 가나2 = 6칸
+		"p047":  4,
+		"「静かく」": 10, // 괄호도 전각이다
+		"a일b":   4,
 	}
 	for in, want := range cases {
 		if got := Width(in); got != want {
