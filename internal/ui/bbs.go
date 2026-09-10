@@ -66,8 +66,8 @@ func Box(label string) []string {
 
 // MenuItem은 번호 항목과 그 아래 밑줄이다. 하이텔 메뉴의 특징적 형태.
 //
-//	  1. 드릴 시작
-//	  ──────────────────────
+//  1. 드릴 시작
+//     ──────────────────────
 func MenuItem(no, label string, ruleW int) []string {
 	return []string{
 		"  " + no + ". " + label,
@@ -77,7 +77,7 @@ func MenuItem(no, label string, ruleW int) []string {
 
 // Entry는 우측 목록의 한 줄이다. 번호 · 이름 · 오른쪽 끝 수치.
 //
-//	  41. ko2ja  N3 일상            47
+//  41. ko2ja  N3 일상            47
 func Entry(no, label, value string, w int) string {
 	head := "  " + no + ". " + label
 	if value == "" {
