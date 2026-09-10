@@ -132,6 +132,23 @@ func CommandBar(commands, prompt string, w int) []string {
 	}
 }
 
+// CommandBarWith는 구분선에 상태를 얹은 명령줄이다.
+//
+//	───────────── 큐 12건 · 오프라인 ─────────────
+//	주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)
+//	선택 >>
+//
+// 상태를 명령 문자열에 이어붙이면 좁은 화면에서 명령이 잘려나간다.
+// 구분선은 어차피 비어 있으므로 그쪽에 둔다.
+func CommandBarWith(status, commands, prompt string, w int) []string {
+	// 구분선은 위쪽 상자와 오른쪽 끝을 맞춘다. 앞에 공백을 두면 1칸 어긋난다.
+	return []string{
+		Rule(" "+status+" ", w),
+		" " + Truncate(commands, w-2),
+		" " + prompt + " ",
+	}
+}
+
 func maxInt(a, b int) int {
 	if a > b {
 		return a
