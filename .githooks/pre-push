@@ -1,0 +1,19 @@
+#!/bin/sh
+# git-flow: main으로의 직접 푸시를 막는다.
+# main은 release/* 또는 hotfix/* 브랜치의 PR 병합으로만 갱신한다.
+#
+# 활성화: git config core.hooksPath .githooks
+# 우회(불가피할 때): git push --no-verify
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	case "$remote_ref" in
+	refs/heads/main)
+		echo "pre-push: main으로 직접 푸시할 수 없습니다." >&2
+		echo "  release/* 또는 hotfix/* 브랜치를 만들어 PR로 병합하세요." >&2
+		echo "  정말 필요하면: git push --no-verify" >&2
+		exit 1
+		;;
+	esac
+done
+
+exit 0
