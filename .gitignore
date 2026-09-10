@@ -1,0 +1,18 @@
+# Go
+/tsuzuri
+/tsuzuri-armv7
+*.exe
+*.test
+*.out
+vendor/
+
+# 스파이크 산출물 (M0에서 만들고 버리는 것)
+/spike/
+
+# 로컬 데이터 — 실기 SD카드에만 존재해야 함
+/data/
+*.jsonl
+config.toml
+
+# macOS
+.DS_Store
