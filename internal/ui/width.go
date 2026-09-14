@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // 터미널에서 두 칸을 차지하는 문자 범위 (East Asian Wide / Fullwidth).
@@ -66,17 +68,24 @@ func Truncate(s string, max int) string {
 
 // TermWidth는 터미널 폭을 구한다.
 //
-// 포메라 화면은 1024x600이고 fbterm 폰트 크기에 따라 칸 수가 달라진다.
-// COLUMNS를 읽되, 없거나 이상하면 보수적인 기본값을 쓴다.
+// 포메라 화면은 1024x600이고 fbterm 폰트 크기에 따라 칸 수가 달라지므로
+// 하드코딩하지 않는다.
+//
+// 터미널에 직접 물어본다(TIOCGWINSZ). COLUMNS 환경변수를 읽는 방식은
+// 동작하지 않는다 — COLUMNS는 셸 내부 변수라 export하지 않으면 자식
+// 프로세스로 전달되지 않고, 그러면 늘 기본값으로 떨어져 폭 적응이
+// 통째로 죽는다. COLUMNS는 ioctl이 실패할 때의 차선책으로만 쓴다.
 func TermWidth() int {
-	const fallback = 76
-	v := os.Getenv("COLUMNS")
-	if v == "" {
-		return fallback
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && sane(w) {
+		return w
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n < 40 || n > 400 {
-		return fallback
+	if n, err := strconv.Atoi(strings.TrimSpace(os.Getenv("COLUMNS"))); err == nil && sane(n) {
+		return n
 	}
-	return n
+	return fallbackWidth
 }
+
+// fallbackWidth는 터미널 폭을 알아낼 수 없을 때 쓰는 보수적인 값이다.
+const fallbackWidth = 76
+
+func sane(n int) bool { return n >= 40 && n <= 400 }
