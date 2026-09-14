@@ -75,9 +75,15 @@ var feedbackSchema = map[string]any{
 	"overall": map[string]any{"type": "string"},
 }
 
+// Result는 한 번의 sync 결과다.
+type Result struct {
+	Processed int // 첨삭을 받은 건수
+	Failed    int // 호출이 실패해 큐에 남긴 건수
+	Missing   int // 문제를 찾지 못해 큐에 남긴 건수
+}
+
 // Run은 큐에 쌓인 답안의 첨삭을 받아 feedback.jsonl에 append한다.
-// 처리한 건수를 돌려준다.
-func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time) (int, error) {
+func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time) (Result, error) {
 	if now == nil {
 		now = time.Now
 	}
@@ -86,15 +92,15 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 
 	queue, err := store.ReadAll[store.QueueItem](queuePath)
 	if err != nil {
-		return 0, err
+		return Result{}, err
 	}
 	if len(queue) == 0 {
-		return 0, nil
+		return Result{}, nil
 	}
 
 	attempts, err := store.ReadAll[store.Attempt](filepath.Join(dataDir, "attempts.jsonl"))
 	if err != nil {
-		return 0, err
+		return Result{}, err
 	}
 	byID := make(map[string]store.Attempt, len(attempts))
 	for _, a := range attempts {
@@ -103,7 +109,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 
 	done, err := store.ReadAll[Feedback](feedbackPath)
 	if err != nil {
-		return 0, err
+		return Result{}, err
 	}
 	// 이미 첨삭받은 답안을 다시 보내면 그대로 두 배 과금이다.
 	already := make(map[string]bool, len(done))
@@ -111,9 +117,9 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		already[f.AttemptID] = true
 	}
 
-	problems, err := loadAllProblems(filepath.Join(dataDir, "packs"))
+	problems, err := pack.ByID(filepath.Join(dataDir, "packs"))
 	if err != nil {
-		return 0, err
+		return Result{}, err
 	}
 
 	pending := make([]store.QueueItem, 0, len(queue))
@@ -127,16 +133,23 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		return pending[i].Priority && !pending[j].Priority
 	})
 
-	processed := 0
+	processed, missing := 0, 0
 	var failed []store.QueueItem
 	for _, q := range pending {
 		a, ok := byID[q.AttemptID]
 		if !ok {
-			continue // 답안이 없으면 큐에서 조용히 버린다
+			// 답안 자체가 없으면 첨삭할 대상이 없다. 큐에서 버린다.
+			continue
 		}
 		p, ok := problems[a.PackID]
 		if !ok {
-			continue // 문제가 없으면 첨삭할 근거가 없다
+			// 문제를 찾을 수 없다 — 팩 파일이 지워졌거나 이름이 바뀌었다.
+			// SD카드를 PC에 꽂는 것을 전제한 설계이므로 충분히 일어난다.
+			// 사용자가 쓴 답안이므로 버리지 않고 큐에 남긴다. 팩을 되돌리면
+			// 다음 sync에서 첨삭된다.
+			failed = append(failed, q)
+			missing++
+			continue
 		}
 		fb, err := review(ctx, c, p, a, now())
 		if err != nil {
@@ -146,15 +159,16 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 			continue
 		}
 		if err := store.Append(feedbackPath, fb); err != nil {
-			return processed, err
+			return Result{Processed: processed}, err
 		}
 		processed++
 	}
 
+	res := Result{Processed: processed, Failed: len(failed) - missing, Missing: missing}
 	if err := rewriteQueue(queuePath, failed); err != nil {
-		return processed, err
+		return res, err
 	}
-	return processed, nil
+	return res, nil
 }
 
 func review(ctx context.Context, c llm.Client, p pack.Problem, a store.Attempt, at time.Time) (Feedback, error) {
@@ -190,20 +204,6 @@ func review(ctx context.Context, c llm.Client, p pack.Problem, a store.Attempt, 
 		Notes:     out.Notes,
 		Overall:   out.Overall,
 	}, nil
-}
-
-func loadAllProblems(dir string) (map[string]pack.Problem, error) {
-	out := map[string]pack.Problem{}
-	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
-		ps, err := pack.LoadDir(dir, d)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range ps {
-			out[p.ID] = p
-		}
-	}
-	return out, nil
 }
 
 // rewriteQueue는 큐를 남은 항목만으로 다시 쓴다.

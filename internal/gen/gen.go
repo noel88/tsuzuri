@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/noel88/tsuzuri/internal/llm"
@@ -139,8 +140,11 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 	}
 	base := fmt.Sprintf("%s-%s-%s", s.Dir, s.Level, now.Format("20060102-150405"))
 	path := filepath.Join(dir, base+".jsonl")
-	for n := 2; ; n++ {
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+	// 이름이 겹치면 번호를 붙인다. NotExist가 아닌 오류(권한, SD카드 I/O)는
+	// 이름을 바꿔도 사라지지 않으므로 루프를 빠져나가 O_EXCL이 판정하게 한다.
+	for n := 2; n < 100; n++ {
+		_, err := os.Stat(path)
+		if err != nil {
 			break
 		}
 		path = filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", base, n))
@@ -152,8 +156,15 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 	}
 	defer f.Close()
 
+	// ID를 팩 이름으로 네임스페이스한다.
+	//
+	// 모델은 매번 p001부터 번호를 매기므로 팩끼리 ID가 겹친다. 답안은
+	// 문제 ID만 기억하기 때문에, 겹치면 엉뚱한 문제로 채점하고 그 비용을
+	// 청구받는다. 파일명은 시각까지 포함하므로 팩마다 다르다.
+	prefix := strings.TrimSuffix(filepath.Base(path), ".jsonl") + "/"
 	enc := json.NewEncoder(f)
 	for _, p := range ps {
+		p.ID = prefix + p.ID
 		if err := enc.Encode(p); err != nil {
 			return "", err
 		}

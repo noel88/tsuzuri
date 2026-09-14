@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -71,6 +72,37 @@ func Load(path string) ([]Problem, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// ByID는 디렉터리의 모든 팩을 읽어 ID로 찾을 수 있는 map을 만든다.
+//
+// 답안은 문제 ID만 기억하므로, ID가 겹치면 엉뚱한 문제로 채점하고
+// 그 비용까지 청구된다. 겹치는 ID를 만나면 오류로 보고한다.
+func ByID(dir string) (map[string]Problem, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+
+	out := map[string]Problem{}
+	from := map[string]string{}
+	for _, path := range paths {
+		ps, err := Load(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range ps {
+			if prev, dup := from[p.ID]; dup {
+				return nil, fmt.Errorf(
+					"문제 id %q가 %s와 %s에 겹칩니다. 한쪽 팩을 옮기거나 지우세요",
+					p.ID, filepath.Base(prev), filepath.Base(path))
+			}
+			from[p.ID] = path
+			out[p.ID] = p
+		}
 	}
 	return out, nil
 }

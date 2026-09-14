@@ -37,15 +37,9 @@ func Write(dataDir string, now time.Time) (string, int, error) {
 		byID[a.ID] = a
 	}
 
-	problems := map[string]pack.Problem{}
-	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
-		ps, err := pack.LoadDir(filepath.Join(dataDir, "packs"), d)
-		if err != nil {
-			return "", 0, err
-		}
-		for _, p := range ps {
-			problems[p.ID] = p
-		}
+	problems, err := pack.ByID(filepath.Join(dataDir, "packs"))
+	if err != nil {
+		return "", 0, err
 	}
 
 	var b strings.Builder
@@ -62,7 +56,11 @@ func Write(dataDir string, now time.Time) (string, int, error) {
 		if !ok {
 			continue
 		}
-		p := problems[a.PackID]
+		p, ok := problems[a.PackID]
+		if !ok {
+			// 팩이 사라졌다. 제시문도 참조도 없이 내보내면 읽을 수 없다.
+			continue
+		}
 
 		line(fmt.Sprintf("[%s] %s %s", p.ID, p.Level, p.Topic))
 		line("제시문: " + p.Prompt)
