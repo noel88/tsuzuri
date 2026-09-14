@@ -155,3 +155,46 @@ func TestWrapRespectsDisplayWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestWrapSplitsOnNewlines(t *testing.T) {
+	// :e 에디터로 쓴 여러 줄 답안이 그대로 들어온다.
+	got := wrap("첫 줄\n둘째 줄", 40)
+	if len(got) != 2 {
+		t.Fatalf("두 줄이어야 한다: %d줄 %q", len(got), got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "\n") {
+			t.Errorf("결과에 개행이 남으면 안 된다: %q", l)
+		}
+	}
+}
+
+func TestLabeledIndentsEveryLineOfMultilineAnswer(t *testing.T) {
+	// 개행을 폭 1로 취급하면 둘째 줄이 들여쓰기를 잃어 나/참조 대조가 깨진다.
+	got := labeled("나  : ", "내일은 비가 올 거예요.\n그리고 바람도 불 거예요.", 60)
+	if len(got) != 2 {
+		t.Fatalf("두 줄이어야 한다: %d줄 %q", len(got), got)
+	}
+	indent := func(s string) int { return Width(s) - Width(strings.TrimLeft(s, " ")) }
+	if indent(got[1]) != Width("  나  : ") {
+		t.Errorf("이어지는 줄이 라벨 폭만큼 들여써져야 한다: %q (들여쓰기 %d)",
+			got[1], indent(got[1]))
+	}
+}
+
+func TestRenderResultFitsTerminalWithMultilineAnswer(t *testing.T) {
+	answer := "내일은 비가 올 거예요.\n그리고 바람도 불 거예요.\n우산을 챙기세요."
+	for _, termW := range []int{60, 76, 92} {
+		out := RenderResult(sampleProblem(), answer, noisyAnalysis(), sampleStatus(), termW)
+		for _, line := range strings.Split(out, "\n") {
+			if Width(line) > termW {
+				t.Errorf("폭 %d에서 넘친다 (%d칸): %q", termW, Width(line), line)
+			}
+			if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "┌") &&
+				!strings.HasPrefix(line, "│") && !strings.HasPrefix(line, "└") &&
+				!strings.HasPrefix(line, "─") {
+				t.Errorf("가운데 여백을 잃은 줄이 있다: %q", line)
+			}
+		}
+	}
+}

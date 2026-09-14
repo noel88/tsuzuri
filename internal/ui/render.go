@@ -173,10 +173,22 @@ func wrapIndent(text string, width int, prefix string) []string {
 
 // wrap은 표시폭 기준으로 줄을 나눈다.
 // CJK는 단어 경계가 없으므로 폭이 차면 그냥 끊는다.
+//
+// 원래 있던 개행은 먼저 나눈다. :e로 연 에디터에서 쓴 여러 줄 답안이나
+// LLM이 돌려준 여러 줄 총평이 그대로 들어오는데, 개행을 폭 1짜리 문자로
+// 취급하면 그 줄만 들여쓰기와 가운데 여백을 잃어 나/참조 대조가 깨진다.
 func wrap(text string, width int) []string {
 	if width < 4 {
 		width = 4
 	}
+	var out []string
+	for _, seg := range strings.Split(text, "\n") {
+		out = append(out, wrapSegment(strings.TrimRight(seg, "\r"), width)...)
+	}
+	return out
+}
+
+func wrapSegment(text string, width int) []string {
 	var out []string
 	var cur strings.Builder
 	w := 0

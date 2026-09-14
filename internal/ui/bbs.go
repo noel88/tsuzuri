@@ -81,8 +81,11 @@ func MenuItem(no, label string, ruleW int) []string {
 func Entry(no, label, value string, w int) string {
 	head := "  " + no + ". " + label
 	if value == "" {
-		return head
+		return Truncate(head, w)
 	}
+	// 머리말을 잘라 줄이 폭을 넘지 않게 한다. 팩 라벨은 레벨·주제가
+	// 붙어 길어질 수 있고 주제는 LLM이 만든 자유 문자열이다.
+	head = Truncate(head, w-Width(value)-1)
 	gap := w - Width(head) - Width(value)
 	if gap < 1 {
 		gap = 1

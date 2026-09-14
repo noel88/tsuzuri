@@ -130,3 +130,24 @@ func TestCommandBarWithKeepsStatusAndCommands(t *testing.T) {
 		t.Errorf("구분선 폭 = %d, 기대 70", Width(got[0]))
 	}
 }
+
+func TestEntryTruncatesLongLabel(t *testing.T) {
+	// 팩 라벨은 레벨·주제가 붙어 길어지고, 주제는 LLM이 만든 자유 문자열이다.
+	long := "ko2ja  N1·N2·… 일상생활·해외여행·비즈니스회화·…"
+	for _, w := range []int{40, 60, 76} {
+		got := Entry("41", long, "47", w)
+		if Width(got) > w {
+			t.Errorf("폭 %d에서 넘친다 (%d칸): %q", w, Width(got), got)
+		}
+		if !strings.HasSuffix(got, "47") {
+			t.Errorf("수치는 남아야 한다: %q", got)
+		}
+	}
+}
+
+func TestEntryTruncatesEvenWithoutValue(t *testing.T) {
+	got := Entry("41", strings.Repeat("가", 60), "", 40)
+	if Width(got) > 40 {
+		t.Errorf("폭 %d가 40을 넘는다: %q", Width(got), got)
+	}
+}

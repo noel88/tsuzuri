@@ -331,9 +331,13 @@ func (a *app) export() error {
 }
 
 func (a *app) setup() error {
+	// 설정이 깨져 있어도 설정 화면은 열려야 한다. 이 파일은 vim으로 직접
+	// 고치는 것을 전제하므로 오타가 예상되는 실패이고, 여기서 막으면
+	// 그것을 고칠 유일한 화면에 들어갈 수 없게 된다.
 	c, err := config.Load(a.configPath)
 	if err != nil {
-		return err
+		a.notice("설정 파일을 읽지 못해 기본값으로 엽니다. 저장하면 덮어씁니다.\n  " + err.Error())
+		c = config.Default()
 	}
 	fmt.Fprint(a.out, ui.RenderSetup(c, ui.Status{}, a.termW))
 

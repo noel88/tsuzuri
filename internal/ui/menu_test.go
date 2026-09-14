@@ -56,3 +56,19 @@ func TestParseMenuKey(t *testing.T) {
 		t.Error("q도 종료여야 한다")
 	}
 }
+
+func TestRenderMenuFitsTerminalWithLongLabels(t *testing.T) {
+	// 짧은 라벨만 쓰면 Entry의 넘침을 못 잡는다.
+	choices := []Choice{
+		{Key: "41", Label: "ko2ja  N1·N2·… 일상생활·해외여행·비즈니스회화·…", Value: "247"},
+		{Key: "42", Label: "ja2ko  N1·N2·… 뉴스기사·소설발췌·기술문서·…", Value: "112"},
+	}
+	for _, termW := range []int{60, 76, 92} {
+		out := RenderMenu(choices, Status{Total: 47}, termW)
+		for _, line := range strings.Split(out, "\n") {
+			if Width(line) > termW {
+				t.Errorf("폭 %d에서 넘친다 (%d칸): %q", termW, Width(line), line)
+			}
+		}
+	}
+}
