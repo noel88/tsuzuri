@@ -13,6 +13,7 @@ type Status struct {
 	Index    int  // 지금 몇 번째 문제인지 (1부터)
 	Total    int  // 전체 문제 수
 	QueueLen int  // 첨삭 대기 건수
+	Feedback int  // 받은 첨삭 건수
 	Online   bool // 네트워크 연결 여부
 }
 
