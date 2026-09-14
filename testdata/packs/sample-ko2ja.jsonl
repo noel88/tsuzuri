@@ -1,0 +1,3 @@
+{"id":"p001","dir":"ko2ja","level":"N3","topic":"일상","prompt":"어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.","reference":"昨日初めて行ったカフェが思ったより静かで、長く座っていた。","key_points":["初めて","思ったより","〜ていた"],"traps":["「静かくて」는 な형용사 활용 오류"],"style":"plain"}
+{"id":"p002","dir":"ko2ja","level":"N3","topic":"일상","prompt":"비가 올 것 같아서 우산을 가져왔습니다.","reference":"雨が降りそうなので傘を持ってきました。","key_points":["〜そう","ので"],"traps":[],"style":"polite"}
+

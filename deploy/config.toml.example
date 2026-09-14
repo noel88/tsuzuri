@@ -1,0 +1,13 @@
+# Tsuzuri 설정
+#
+# 주의: 이 파일은 SD카드에 평문으로 저장됩니다. 기기나 SD를 잃으면
+# API 키가 노출됩니다. 이 앱 전용 키를 발급하고 사용량 제한을 거세요.
+#
+# 키를 SD카드에 두고 싶지 않으면 이 줄을 비우고 환경변수를 쓰세요:
+#   ANTHROPIC_API_KEY=sk-ant-... ./tsuzuri
+
+api_key = ""
+model = "claude-opus-5"
+level = "N3"
+topic = "일상"
+pack_size = 30
