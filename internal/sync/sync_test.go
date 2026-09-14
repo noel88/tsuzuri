@@ -54,12 +54,12 @@ func TestRunWritesFeedback(t *testing.T) {
 	dir := seed(t)
 	f := &llm.FakeClient{Reply: feedbackReply}
 
-	n, err := Run(context.Background(), f, dir, fixedNow)
+	res, err := Run(context.Background(), f, dir, fixedNow)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("처리 건수 = %d, 기대 1", n)
+	if res.Processed != 1 {
+		t.Fatalf("처리 건수 = %d, 기대 1", res.Processed)
 	}
 
 	got, err := store.ReadAll[Feedback](filepath.Join(dir, "feedback.jsonl"))
@@ -129,12 +129,12 @@ func TestRunKeepsFailedItemsInQueue(t *testing.T) {
 	dir := seed(t)
 	f := &llm.FakeClient{Err: errors.New("연결 끊김")}
 
-	n, err := Run(context.Background(), f, dir, fixedNow)
+	res, err := Run(context.Background(), f, dir, fixedNow)
 	if err != nil {
 		t.Fatalf("개별 실패는 전체 오류가 아니다: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("처리 건수 = %d", n)
+	if res.Processed != 0 || res.Failed != 1 {
+		t.Errorf("결과 = %+v, 기대 {0 1 0}", res)
 	}
 	q, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
 	if len(q) != 1 {
@@ -154,12 +154,12 @@ func TestRunSkipsAlreadyFeedbacked(t *testing.T) {
 	writeJSONL(t, filepath.Join(dir, "queue.jsonl"), store.QueueItem{
 		AttemptID: "a001", At: fixedNow(),
 	})
-	n, err := Run(context.Background(), f, dir, fixedNow)
+	res, err := Run(context.Background(), f, dir, fixedNow)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 0 {
-		t.Errorf("이미 첨삭받은 건을 다시 보내면 안 된다: %d건", n)
+	if res.Processed != 0 {
+		t.Errorf("이미 첨삭받은 건을 다시 보내면 안 된다: %d건", res.Processed)
 	}
 	if f.Calls != callsAfterFirst {
 		t.Errorf("API를 다시 부르면 안 된다: %d → %d", callsAfterFirst, f.Calls)
@@ -169,12 +169,12 @@ func TestRunSkipsAlreadyFeedbacked(t *testing.T) {
 func TestRunEmptyQueueIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
 	f := &llm.FakeClient{Reply: feedbackReply}
-	n, err := Run(context.Background(), f, dir, fixedNow)
+	res, err := Run(context.Background(), f, dir, fixedNow)
 	if err != nil {
 		t.Fatalf("빈 큐는 오류가 아니다: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("처리 건수 = %d", n)
+	if res.Processed != 0 {
+		t.Errorf("처리 건수 = %d", res.Processed)
 	}
 	if f.Calls != 0 {
 		t.Error("빈 큐에 API를 부르면 안 된다")
@@ -201,6 +201,31 @@ func TestRunPrioritizesFlaggedItems(t *testing.T) {
 	}
 	if got[0].AttemptID != "a002" {
 		t.Errorf("우선 표시된 항목이 먼저여야 한다: %q", got[0].AttemptID)
+	}
+}
+
+func TestRunKeepsAnswerWhenPackIsMissing(t *testing.T) {
+	// 팩 파일이 지워지거나 이름이 바뀌면(SD카드를 PC에 꽂는 전제) 문제를
+	// 찾을 수 없다. 사용자가 쓴 답안이므로 큐에서 버리면 안 된다.
+	dir := seed(t)
+	if err := os.Remove(filepath.Join(dir, "packs", "p.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &llm.FakeClient{Reply: feedbackReply}
+	res, err := Run(context.Background(), f, dir, fixedNow)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Missing != 1 {
+		t.Errorf("문제를 못 찾은 건수 = %d, 기대 1", res.Missing)
+	}
+	q, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
+	if len(q) != 1 {
+		t.Errorf("답안이 큐에 남아야 한다 — 지우면 영영 첨삭받지 못한다: %+v", q)
+	}
+	if f.Calls != 0 {
+		t.Error("문제 없이 API를 부르면 안 된다")
 	}
 }
 

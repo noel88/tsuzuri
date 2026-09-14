@@ -139,8 +139,16 @@ func TestWritePackProducesLoadableFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("생성한 팩을 pack.Load가 읽지 못한다: %v", err)
 	}
-	if len(got) != 1 || got[0].ID != "x1" {
-		t.Errorf("왕복 실패: %+v", got)
+	if len(got) != 1 {
+		t.Fatalf("왕복 실패: %+v", got)
+	}
+	// WritePack이 ID를 팩 이름으로 네임스페이스한다.
+	// 모델은 팩마다 p001부터 번호를 매기므로 그대로 두면 팩끼리 겹친다.
+	if !strings.HasSuffix(got[0].ID, "/x1") {
+		t.Errorf("ID에 팩 이름이 붙어야 한다: %q", got[0].ID)
+	}
+	if got[0].ID == "x1" {
+		t.Error("네임스페이스가 적용되지 않았다")
 	}
 	if got[0].Reference != "昨日カフェに行った。" {
 		t.Errorf("일본어가 깨졌다: %q", got[0].Reference)
@@ -167,6 +175,27 @@ func TestWritePackDoesNotOverwriteExisting(t *testing.T) {
 	got, err := pack.Load(p1)
 	if err != nil || len(got) != 1 {
 		t.Errorf("첫 팩이 온전해야 한다: %v %+v", err, got)
+	}
+}
+
+func TestWritePackNamespacesIDsPerPack(t *testing.T) {
+	// 두 팩이 같은 ID 집합을 내놓아도 충돌하지 않아야 한다.
+	dir := t.TempDir()
+	ps := []pack.Problem{{ID: "p001", Dir: pack.KoToJa, Prompt: "a", Reference: "b", Style: pack.StylePlain}}
+
+	if _, err := WritePack(dir, spec(), ps, at()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WritePack(dir, spec(), ps, at().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	byID, err := pack.ByID(dir)
+	if err != nil {
+		t.Fatalf("두 팩의 ID가 겹치면 안 된다: %v", err)
+	}
+	if len(byID) != 2 {
+		t.Errorf("문제 개수 = %d, 기대 2", len(byID))
 	}
 }
 

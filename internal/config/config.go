@@ -52,18 +52,39 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-// Save는 설정을 쓴다. 권한을 0600으로 좁힌다 — API 키가 들어간다.
+// Save는 설정을 쓴다.
+//
+// 임시 파일에 쓰고 rename으로 바꾼다. 제자리에서 truncate하면 그 사이에
+// 전원이 끊길 때 API 키를 잃는데, 포메라는 예고 없이 꺼지는 기계다.
+//
+// 권한은 명시적으로 0600으로 맞춘다. OpenFile의 mode는 파일을 **만들 때만**
+// 적용되므로, vim으로 먼저 만들어 둔 0644 파일은 그냥 두면 세계 읽기 가능인
+// 채로 API 키를 담게 된다.
 func Save(path string, c Config) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
 	if err := toml.NewEncoder(f).Encode(c); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return err
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // ResolvedKeyOf는 실제로 쓸 API 키를 고른다.

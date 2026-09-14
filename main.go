@@ -282,7 +282,7 @@ func (a *app) review() (bool, error) {
 	for _, at := range attempts {
 		byID[at.ID] = at
 	}
-	problems, err := a.allProblems()
+	problems, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
 	if err != nil {
 		return false, err
 	}
@@ -292,7 +292,11 @@ func (a *app) review() (bool, error) {
 		if !ok {
 			continue
 		}
-		p := problems[at.PackID]
+		p, ok := problems[at.PackID]
+		if !ok {
+			// 팩이 사라졌다. 제시문 없이 첨삭만 보여주면 맥락이 없다.
+			continue
+		}
 		st := ui.Status{Index: i + 1, Total: len(feedback)}
 		fmt.Fprint(a.out, ui.RenderFeedback(p, at, f, st, a.termW))
 
@@ -422,15 +426,23 @@ func (a *app) fetchFeedback() error {
 	}
 
 	a.notice("첨삭을 받아오는 중입니다...")
-	n, err := tsync.Run(context.Background(), client, a.dataDir, time.Now)
+	res, err := tsync.Run(context.Background(), client, a.dataDir, time.Now)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	switch {
+	case res.Processed > 0:
+		a.notice(fmt.Sprintf("%d건의 첨삭을 받았습니다. 2번에서 볼 수 있습니다.", res.Processed))
+	case res.Failed == 0 && res.Missing == 0:
 		a.notice("처리할 항목이 없습니다.")
-		return nil
 	}
-	a.notice(fmt.Sprintf("%d건의 첨삭을 받았습니다. 2번에서 볼 수 있습니다.", n))
+	if res.Failed > 0 {
+		a.notice(fmt.Sprintf("%d건은 실패해 큐에 남겼습니다. 다시 시도하면 됩니다.", res.Failed))
+	}
+	if res.Missing > 0 {
+		a.notice(fmt.Sprintf("%d건은 문제를 찾지 못했습니다. packs/ 에서 팩이 지워졌는지 확인하세요. "+
+			"답안은 큐에 그대로 남아 있습니다.", res.Missing))
+	}
 	return nil
 }
 
@@ -459,20 +471,6 @@ func (a *app) loadPackSets() ([]packSet, error) {
 		sets = append(sets, packSet{key: strconv.Itoa(41 + len(sets)), dir: d, problems: ps})
 	}
 	return sets, nil
-}
-
-func (a *app) allProblems() (map[string]pack.Problem, error) {
-	out := map[string]pack.Problem{}
-	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
-		ps, err := pack.LoadDir(filepath.Join(a.dataDir, "packs"), d)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range ps {
-			out[p.ID] = p
-		}
-	}
-	return out, nil
 }
 
 func (a *app) status(sets []packSet) (ui.Status, error) {

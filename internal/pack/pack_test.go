@@ -1,6 +1,8 @@
 package pack
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,5 +67,37 @@ func TestLoadDirFiltersByDirection(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Error("ko2ja 문제가 하나도 없다")
+	}
+}
+
+func TestByIDDetectsCollisionAcrossPacks(t *testing.T) {
+	// 모델은 팩마다 p001부터 번호를 매긴다. ID가 겹치면 답안이 어느 문제
+	// 것인지 알 수 없어 엉뚱한 문제로 채점하고 그 비용을 청구받는다.
+	dir := t.TempDir()
+	line := `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	for _, name := range []string{"a.jsonl", "b.jsonl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := ByID(dir)
+	if err == nil {
+		t.Fatal("겹치는 id는 오류로 보고해야 한다")
+	}
+	if !strings.Contains(err.Error(), "p001") {
+		t.Errorf("어떤 id가 겹치는지 알려야 한다: %v", err)
+	}
+}
+
+func TestByIDLoadsAcrossDirections(t *testing.T) {
+	got, err := ByID("../../testdata/packs")
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("문제가 없다")
+	}
+	if _, ok := got["p001"]; !ok {
+		t.Errorf("p001을 찾지 못했다: %v", got)
 	}
 }

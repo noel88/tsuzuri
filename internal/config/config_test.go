@@ -102,3 +102,49 @@ func TestValidatePassesWithKey(t *testing.T) {
 		t.Errorf("통과해야 한다: %v", err)
 	}
 }
+
+func TestSaveNarrowsPermissionsOnExistingFile(t *testing.T) {
+	// OpenFile의 mode는 생성할 때만 적용된다. vim으로 먼저 만든 0644 파일에
+	// 키를 저장하면 세계 읽기 가능인 채로 남는다.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("level = \"N3\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, Config{APIKey: "sk-ant-secret", Model: "claude-opus-5"}); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("기존 파일 권한 = %v, 기대 0600", fi.Mode().Perm())
+	}
+}
+
+func TestSaveLeavesNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := Save(path, Config{APIKey: "sk-ant-test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Error("임시 파일이 남으면 안 된다")
+	}
+}
+
+func TestSaveDoesNotDestroyExistingOnEncodeFailure(t *testing.T) {
+	// 제자리 truncate였다면 쓰기 도중 실패가 기존 키를 날린다.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Save(path, Config{APIKey: "sk-ant-original", Model: "claude-opus-5"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// rename 방식이면 tmp에만 쓰이므로 원본은 어느 시점에도 비지 않는다.
+	if !strings.Contains(string(before), "sk-ant-original") {
+		t.Fatalf("원본이 온전해야 한다:\n%s", before)
+	}
+}
