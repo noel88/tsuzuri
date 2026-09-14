@@ -35,7 +35,7 @@ func TestDemoScreen(t *testing.T) {
 
 	menu = append(menu, TwoCol(left, right, 30, 4)...)
 	menu = append(menu, "")
-	menu = append(menu, CommandBar("주요명령(드릴 D, 복습 R)  이동(번호)  종료(X)", "선택(도움말[H]) >>", w)...)
+	menu = append(menu, CommandBarWith("오프라인", "주요명령(드릴 D, 복습 R)  이동(번호)  종료(X)", "선택(도움말[H]) >>", w)...)
 
 	// ── 드릴 화면 ──
 	var drill []string
@@ -52,7 +52,7 @@ func TestDemoScreen(t *testing.T) {
 	drill = append(drill, "  ⚠ 문체        답안 정중체 / 문제 보통체")
 	drill = append(drill, "  "+Divider(w-4))
 	drill = append(drill, "")
-	drill = append(drill, CommandBar("주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)", "선택 >>", w)...)
+	drill = append(drill, CommandBarWith("12/47 · 큐 12건 · 오프라인", "주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)", "선택 >>", w)...)
 
 	fmt.Println("\n눈금 (92칸):")
 	fmt.Println(strings.Repeat("1234567890", 9) + "12")
