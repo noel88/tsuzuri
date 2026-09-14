@@ -1,6 +1,7 @@
 # Go
 /tsuzuri
 /tsuzuri-armv7
+/deploy/tsuzuri
 *.exe
 *.test
 *.out
@@ -9,10 +10,18 @@ vendor/
 # 스파이크 산출물 (M0에서 만들고 버리는 것)
 /spike/
 
-# 로컬 데이터 — 실기 SD카드에만 존재해야 함
+# 실행 중 만들어지는 로컬 데이터.
+#
+# *.jsonl 로 싸잡아 무시하면 testdata/의 테스트 픽스처까지 삼켜서,
+# 새로 클론했을 때 테스트가 깨진다. 실제로 그랬다.
+# 런타임이 만드는 경로만 정확히 지목한다.
+/packs/
+/attempts.jsonl
+/queue.jsonl
+/feedback.jsonl
+/review/
+/config.toml
 /data/
-*.jsonl
-config.toml
 
 # macOS
 .DS_Store
