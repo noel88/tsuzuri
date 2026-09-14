@@ -119,20 +119,7 @@ func TwoCol(left, right []string, leftW, gap int) []string {
 
 // Divider는 가로 구분선이다.
 func Divider(w int) string {
-	return strings.Repeat("─", maxInt(w, 0))
-}
-
-// CommandBar는 하단 명령어 안내와 입력 프롬프트다.
-//
-//	──────────────────────────────────────
-//	주요명령(다음 ⏎, 첨삭 F)  메뉴(M)  종료(X)
-//	선택 >>
-func CommandBar(commands, prompt string, w int) []string {
-	return []string{
-		" " + Divider(w-2),
-		" " + Truncate(commands, w-2),
-		" " + prompt + " ",
-	}
+	return strings.Repeat("─", max(w, 0))
 }
 
 // CommandBarWith는 구분선에 상태를 얹은 명령줄이다.
@@ -150,11 +137,4 @@ func CommandBarWith(status, commands, prompt string, w int) []string {
 		" " + Truncate(commands, w-2),
 		" " + prompt + " ",
 	}
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

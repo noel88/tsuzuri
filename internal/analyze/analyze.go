@@ -41,9 +41,6 @@ func New(d pack.Direction) (*Analyzer, error) {
 	return &Analyzer{dir: d, tk: tk}, nil
 }
 
-// Direction은 이 분석기가 다루는 방향이다.
-func (a *Analyzer) Direction() pack.Direction { return a.dir }
-
 // Analyze는 답안 하나를 분석한다.
 func (a *Analyzer) Analyze(p pack.Problem, answer string) Analysis {
 	ansTokens := a.tk.Tokenize(answer)

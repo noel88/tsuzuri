@@ -43,6 +43,9 @@ type app struct {
 	in         *bufio.Reader
 	out        io.Writer
 
+	// 마지막 온라인 작업이 성공했는지. 초기화면 상태 표시에 쓴다.
+	online bool
+
 	// 사전은 한 번에 하나만 상주시킨다.
 	//
 	// 측정: 일본어(IPADIC) 88MB + 한국어(ko-dic) 211MB = 300MB 라이브 힙.
@@ -297,7 +300,7 @@ func (a *app) review() (bool, error) {
 			// 팩이 사라졌다. 제시문 없이 첨삭만 보여주면 맥락이 없다.
 			continue
 		}
-		st := ui.Status{Index: i + 1, Total: len(feedback)}
+		st := ui.Status{Index: i + 1, Total: len(feedback), Online: a.online}
 		fmt.Fprint(a.out, ui.RenderFeedback(p, at, f, st, a.termW))
 
 		line, eof, err := ui.ReadLine(a.in)
@@ -454,8 +457,10 @@ func (a *app) fetchFeedback() error {
 // 실기에서 처음 막힐 때 원인을 알려주는 것이 이 순서의 이유다.
 func (a *app) onlineClient(c config.Config) (llm.Client, error) {
 	if err := (llm.Preflight{}).Check(context.Background()); err != nil {
+		a.online = false
 		return nil, err
 	}
+	a.online = true
 	return llm.NewAnthropic(c)
 }
 
@@ -490,7 +495,7 @@ func (a *app) status(sets []packSet) (ui.Status, error) {
 	for _, s := range sets {
 		total += len(s.problems)
 	}
-	return ui.Status{Total: total, QueueLen: len(queue), Feedback: len(feedback)}, nil
+	return ui.Status{Total: total, QueueLen: len(queue), Feedback: len(feedback), Online: a.online}, nil
 }
 
 func (a *app) notice(msg string) {

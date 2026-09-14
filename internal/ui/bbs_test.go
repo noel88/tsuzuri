@@ -101,19 +101,6 @@ func TestTwoColPadsShorterColumn(t *testing.T) {
 	}
 }
 
-func TestCommandBarShape(t *testing.T) {
-	got := CommandBar("주요명령(다음 ⏎, 첨삭 F)  종료(X)", "선택 >>", 70)
-	if len(got) != 3 {
-		t.Fatalf("명령줄은 3줄: %d", len(got))
-	}
-	if strings.Count(got[0], "─") != 68 {
-		t.Errorf("구분선 길이 = %d, 기대 68", strings.Count(got[0], "─"))
-	}
-	if !strings.Contains(got[2], "선택 >>") {
-		t.Errorf("프롬프트 = %q", got[2])
-	}
-}
-
 func TestCommandBarWithKeepsStatusAndCommands(t *testing.T) {
 	got := CommandBarWith("큐 12건 · 오프라인",
 		"주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)", "선택 >>", 70)
