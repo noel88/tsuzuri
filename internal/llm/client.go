@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -49,6 +50,12 @@ func (f *FakeClient) Complete(_ context.Context, req Request) (string, error) {
 	return f.Reply, nil
 }
 
+// requestTimeout은 한 번의 API 호출에 허용하는 최대 시간이다.
+//
+// 포메라의 Wi-Fi는 불안정하다. 타임아웃이 없으면 멈춘 연결에서
+// 무한히 대기하게 되고, 사용자에게는 진행도, 오류도, 빠져나갈 길도 없다.
+const requestTimeout = 5 * time.Minute
+
 type anthropicClient struct {
 	api   anthropic.Client
 	model string
@@ -60,7 +67,10 @@ func NewAnthropic(c config.Config) (Client, error) {
 		return nil, err
 	}
 	return &anthropicClient{
-		api:   anthropic.NewClient(option.WithAPIKey(c.ResolvedKey())),
+		api: anthropic.NewClient(
+			option.WithAPIKey(c.ResolvedKey()),
+			option.WithRequestTimeout(requestTimeout),
+		),
 		model: c.Model,
 	}, nil
 }
@@ -100,6 +110,9 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 	}
 
 	// 긴 출력이 HTTP 타임아웃에 걸리지 않도록 스트리밍으로 받아 누적한다.
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
 	stream := a.api.Messages.NewStreaming(ctx, params)
 	var msg anthropic.Message
 	for stream.Next() {
@@ -119,6 +132,10 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 func extractJSON(msg anthropic.Message) (string, error) {
 	for _, block := range msg.Content {
 		if v, ok := block.AsAny().(anthropic.ToolUseBlock); ok {
+			if truncated(msg) {
+				return "", fmt.Errorf(
+					"응답이 토큰 한도에서 잘렸습니다. 팩 크기를 줄여 보세요 (설정 5번)")
+			}
 			return v.JSON.Input.Raw(), nil
 		}
 	}
@@ -131,4 +148,12 @@ func extractJSON(msg anthropic.Message) (string, error) {
 		return "", fmt.Errorf("요청이 거부되었습니다: %s", msg.StopDetails.Explanation)
 	}
 	return "", fmt.Errorf("구조화된 응답을 받지 못했습니다 (stop_reason=%q)", msg.StopReason)
+}
+
+// truncated는 응답이 토큰 한도에서 잘렸는지 본다.
+//
+// 잘린 툴 호출은 반쪽짜리 JSON을 남기므로, 그대로 두면 상위에서
+// "unexpected end of JSON input"만 보게 된다 — 이미 전액 청구된 뒤에.
+func truncated(msg anthropic.Message) bool {
+	return msg.StopReason == anthropic.StopReasonMaxTokens
 }
