@@ -22,8 +22,8 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	var lines []string
 	lines = append(lines, Banner("綴 / T·S·U·Z·U·R·I", "한↔일 번역 작문 드릴", w)...)
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("   팩 %d개 · 남은 문제 %d · 첨삭 큐 %d건 · %s",
-		len(choices), st.Total, st.QueueLen, connLabel(st.Online)))
+	lines = append(lines, fmt.Sprintf("   팩 %d개 · 문제 %d · 첨삭 대기 %d건 · 받은 첨삭 %d건",
+		len(choices), st.Total, st.QueueLen, st.Feedback))
 	lines = append(lines, "")
 
 	leftW := 28
@@ -37,6 +37,8 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	left = append(left, MenuItem("2", "복습", 22)...)
 	left = append(left, MenuItem("3", "내보내기", 22)...)
 	left = append(left, MenuItem("4", "설정", 22)...)
+	left = append(left, MenuItem("5", "팩 받기", 22)...)
+	left = append(left, MenuItem("6", "첨삭 받기", 22)...)
 
 	var right []string
 	right = append(right, Box("자 료 실")...)
@@ -50,8 +52,8 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	lines = append(lines, TwoCol(left, right, leftW, 4)...)
 	lines = append(lines, "")
 	lines = append(lines, CommandBarWith(
-		"2·3·4는 아직 준비 중",
-		"주요명령(이동 번호)  종료(X)",
+		fmt.Sprintf("첨삭 큐 %d건 · %s", st.QueueLen, connLabel(st.Online)),
+		"주요명령(이동 번호)  5·6은 네트워크 필요  종료(X)",
 		"선택 >>", w)...)
 
 	return Join(Center(lines, termW, w))
