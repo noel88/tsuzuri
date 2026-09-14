@@ -48,19 +48,29 @@ func TestTruncateLeavesShortStrings(t *testing.T) {
 	}
 }
 
-func TestTermWidthReadsColumns(t *testing.T) {
+func TestTermWidthIsUsableWithoutATerminal(t *testing.T) {
+	// go test는 stdout이 터미널이 아니므로 ioctl이 실패한다.
+	// 그래도 쓸 만한 값이 나와야 한다.
+	os.Unsetenv("COLUMNS")
+	if got := TermWidth(); !sane(got) {
+		t.Errorf("TermWidth = %d — 40~400 범위여야 한다", got)
+	}
+}
+
+func TestTermWidthFallsBackToColumnsWhenNoTTY(t *testing.T) {
+	// ioctl이 실패할 때의 차선책. COLUMNS는 셸이 export하지 않으면
+	// 자식에게 전달되지 않으므로 이것에 의존할 수는 없다.
 	t.Setenv("COLUMNS", "100")
 	if got := TermWidth(); got != 100 {
 		t.Errorf("TermWidth = %d, 기대 100", got)
 	}
 }
 
-func TestTermWidthFallsBackOnGarbage(t *testing.T) {
+func TestTermWidthRejectsGarbage(t *testing.T) {
 	for _, v := range []string{"", "abc", "5", "9999"} {
-		os.Setenv("COLUMNS", v)
-		if got := TermWidth(); got != 76 {
-			t.Errorf("COLUMNS=%q일 때 TermWidth = %d, 기대 76", v, got)
+		t.Setenv("COLUMNS", v)
+		if got := TermWidth(); got != fallbackWidth {
+			t.Errorf("COLUMNS=%q일 때 TermWidth = %d, 기대 %d", v, got, fallbackWidth)
 		}
 	}
-	os.Unsetenv("COLUMNS")
 }

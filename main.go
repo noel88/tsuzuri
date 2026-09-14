@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/noel88/tsuzuri/internal/analyze"
@@ -41,7 +42,14 @@ type app struct {
 	termW      int
 	in         *bufio.Reader
 	out        io.Writer
-	analyzers  map[pack.Direction]*analyze.Analyzer
+
+	// 사전은 한 번에 하나만 상주시킨다.
+	//
+	// 측정: 일본어(IPADIC) 88MB + 한국어(ko-dic) 211MB = 300MB 라이브 힙.
+	// DM250은 RAM이 1GB이고 Go GC는 보통 라이브 힙의 2배쯤 RSS를 쓰므로,
+	// 두 방향을 동시에 들고 있으면 OOM이다.
+	analyzer    *analyze.Analyzer
+	analyzerDir pack.Direction
 }
 
 func newApp() *app {
@@ -55,7 +63,6 @@ func newApp() *app {
 		termW:      ui.TermWidth(),
 		in:         bufio.NewReader(os.Stdin),
 		out:        os.Stdout,
-		analyzers:  map[pack.Direction]*analyze.Analyzer{},
 	}
 }
 
@@ -99,6 +106,10 @@ func joinKeys(m map[string]bool) string {
 }
 
 func (a *app) run() error {
+	// 방향 전환으로 다시 실행된 경우, 곧바로 그 팩을 연다.
+	pending := os.Getenv(gotoEnv)
+	os.Unsetenv(gotoEnv)
+
 	for {
 		sets, err := a.loadPackSets()
 		if err != nil {
@@ -117,18 +128,23 @@ func (a *app) run() error {
 				Value: strconv.Itoa(len(s.problems)),
 			})
 		}
-		fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW))
+		key, eof := pending, false
+		if pending == "" {
+			fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW))
 
-		line, eof, err := ui.ReadLine(a.in)
-		if err != nil {
-			return err
+			line, isEOF, err := ui.ReadLine(a.in)
+			if err != nil {
+				return err
+			}
+			eof = isEOF
+			var ok bool
+			if key, ok = ui.ParseMenuKey(line); !ok {
+				return nil
+			}
 		}
-		key, ok := ui.ParseMenuKey(line)
-		if !ok {
-			return nil
-		}
+		pending = ""
 
-		quit, err := a.dispatch(key, sets, st)
+		quit, err := a.dispatch(key, sets)
 		if err != nil {
 			a.notice("오류: " + err.Error())
 		}
@@ -139,7 +155,7 @@ func (a *app) run() error {
 }
 
 // dispatch는 초기화면의 선택을 처리한다. 종료해야 하면 true를 돌려준다.
-func (a *app) dispatch(key string, sets []packSet, st ui.Status) (bool, error) {
+func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	switch key {
 	case "2":
 		return a.review()
@@ -157,19 +173,13 @@ func (a *app) dispatch(key string, sets []packSet, st ui.Status) (bool, error) {
 		a.notice(fmt.Sprintf("그런 번호가 없습니다: %q", key))
 		return false, nil
 	}
-	return a.drill(set, st)
+	return a.drill(set)
 }
 
-func (a *app) drill(set packSet, st ui.Status) (bool, error) {
-	az, cached := a.analyzers[set.dir]
-	if !cached {
-		a.notice(fmt.Sprintf("사전을 읽는 중입니다 (%s)...", set.dir))
-		var err error
-		az, err = analyze.New(set.dir)
-		if err != nil {
-			return false, err
-		}
-		a.analyzers[set.dir] = az
+func (a *app) drill(set packSet) (bool, error) {
+	az, err := a.analyzerFor(set.dir)
+	if err != nil {
+		return false, err
 	}
 
 	s := &drill.Session{
@@ -185,6 +195,72 @@ func (a *app) drill(set packSet, st ui.Status) (bool, error) {
 		return false, err
 	}
 	return outcome == drill.OutcomeQuit, nil
+}
+
+// analyzerFor는 그 방향의 분석기를 돌려준다.
+//
+// 한 프로세스는 사전을 하나만 연다. 방향이 바뀌면 자기 자신을 다시
+// 실행해서 OS가 이전 사전의 메모리를 통째로 회수하게 한다.
+//
+// 참조를 끊고 GC를 돌리는 방식은 통하지 않는다. kagome의 사전 패키지는
+// 사전을 패키지 전역 변수에 sync.Once로 담아 두므로, 한 번 Dict()를
+// 부르면 프로세스가 끝날 때까지 상주한다. 측정: 일본어 88MB,
+// 한국어 211MB, 둘 다 열면 300MB — RAM 1GB 기기에서 감당할 수 없다.
+//
+// DictShrink()는 102MB까지 줄여 주지만 BaseForm과 Expression을 함께
+// 버려서 분석이 성립하지 않는다 (internal/analyze/shrink_test.go).
+func (a *app) analyzerFor(d pack.Direction) (*analyze.Analyzer, error) {
+	if a.analyzer != nil {
+		if a.analyzerDir == d {
+			return a.analyzer, nil
+		}
+		return nil, a.restartFor(d)
+	}
+	a.notice(fmt.Sprintf("사전을 읽는 중입니다 (%s)...", d))
+	az, err := analyze.New(d)
+	if err != nil {
+		return nil, err
+	}
+	a.analyzer, a.analyzerDir = az, d
+	return az, nil
+}
+
+// gotoEnv는 재실행 후 곧바로 열 메뉴 번호를 넘기는 환경변수다.
+const gotoEnv = "TSUZURI_GOTO"
+
+// restartFor는 다른 방향을 열기 위해 자기 자신을 다시 실행한다.
+//
+// 성공하면 돌아오지 않는다. exec가 프로세스 이미지를 교체하므로
+// 이전 사전이 차지하던 메모리는 OS가 회수한다.
+func (a *app) restartFor(d pack.Direction) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("방향을 바꾸려면 앱을 다시 실행해야 합니다: %w", err)
+	}
+	a.notice(fmt.Sprintf("방향이 바뀌어 다시 시작합니다 (%s → %s)...", a.analyzerDir, d))
+
+	env := os.Environ()
+	if key, ok := a.keyForDir(d); ok {
+		env = append(env, gotoEnv+"="+key)
+	}
+	if err := syscall.Exec(self, os.Args, env); err != nil {
+		return fmt.Errorf("다시 실행하지 못했습니다. 앱을 끄고 다시 켜 주세요: %w", err)
+	}
+	return nil // 도달하지 않는다
+}
+
+// keyForDir은 그 방향의 팩에 해당하는 메뉴 번호를 찾는다.
+func (a *app) keyForDir(d pack.Direction) (string, bool) {
+	sets, err := a.loadPackSets()
+	if err != nil {
+		return "", false
+	}
+	for _, s := range sets {
+		if s.dir == d {
+			return s.key, true
+		}
+	}
+	return "", false
 }
 
 // review는 받은 첨삭을 순서대로 보여준다.
@@ -369,7 +445,7 @@ func (a *app) onlineClient(c config.Config) (llm.Client, error) {
 
 func (a *app) loadPackSets() ([]packSet, error) {
 	var sets []packSet
-	for i, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
+	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
 		ps, err := pack.LoadDir(filepath.Join(a.dataDir, "packs"), d)
 		if err != nil {
 			return nil, err
@@ -377,7 +453,10 @@ func (a *app) loadPackSets() ([]packSet, error) {
 		if len(ps) == 0 {
 			continue
 		}
-		sets = append(sets, packSet{key: strconv.Itoa(41 + i), dir: d, problems: ps})
+		// 키는 방향 인덱스가 아니라 세트 인덱스로 매긴다.
+		// 방향 인덱스로 매기면 ko2ja 팩이 없을 때 첫 세트가 42가 되는데,
+		// ParseMenuKey는 「1. 드릴 시작」을 41로 보내므로 메뉴가 죽는다.
+		sets = append(sets, packSet{key: strconv.Itoa(41 + len(sets)), dir: d, problems: ps})
 	}
 	return sets, nil
 }
