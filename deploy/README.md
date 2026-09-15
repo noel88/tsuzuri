@@ -93,3 +93,16 @@ sh m0-check.sh
   `ANTHROPIC_API_KEY` 환경변수를 쓴다.
 - **시각이 틀리면 온라인 기능이 전부 막힌다.** TLS 인증서 검증이 실패하기
   때문이다. 앱이 먼저 확인해서 알려주지만, `date`로 미리 봐 두면 좋다.
+
+## 실기 화면 캡처
+
+맥에서 만든 렌더링(`docs/screenshots/`)이 아니라 포메라 화면 그대로가
+필요하면 프레임버퍼를 떠낸다.
+
+```bash
+sudo apt install fbcat
+sudo fbgrab tsuzuri-menu.png      # 앱을 띄워 둔 콘솔에서, 다른 VT나 ssh로 실행
+```
+
+앱이 떠 있는 콘솔을 가리지 않도록 **ssh로 접속해서 찍는 것**이 편하다.
+fbgrab이 없으면 `sudo fbcat > shot.ppm` 후 맥에서 PNG로 바꾼다.
