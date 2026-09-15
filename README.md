@@ -1,5 +1,8 @@
 # Tsuzuri (綴り)
 
+> **실험 단계.** 맥에서 개발·테스트했고 armv7 크로스컴파일까지 확인했지만,
+> 포메라 실기 검증(사전 로딩 시간, fbterm 한글 입력, 글리프)은 아직 하지 않았다.
+
 pomera DM250 (Debian 모드)에서 오프라인으로 돌아가는 **한↔일 양방향 번역 작문 드릴**.
 
 제시문이 한 언어로 나오면 반대 언어로 작문하고, 형태소 분석 기반 자동 분석과 LLM 첨삭으로 피드백을 받는다.
@@ -40,3 +43,13 @@ GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o tsuzuri-armv7
 | `hotfix/*` | `main`에서 분기 → `main`과 `develop`으로 병합 |
 
 `main`으로의 직접 푸시는 하지 않는다.
+
+## 라이선스
+
+Tsuzuri는 [MIT 라이선스](LICENSE)를 따른다.
+
+바이너리에는 형태소 사전 데이터가 임베드된다. 일본어 사전(mecab-ipadic)과
+한국어 사전(mecab-ko-dic, Apache License 2.0)에는 각자의 조건이 있으므로,
+바이너리를 재배포할 때는 [NOTICE](NOTICE)를 함께 넣는다.
+
+"pomera"는 KING JIM의 상표다. 이 프로젝트는 KING JIM과 관계가 없다.
