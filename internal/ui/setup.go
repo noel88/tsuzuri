@@ -56,7 +56,7 @@ func RenderSetup(c config.Config, st Status, termW int) string {
 		"주요명령(고칠 번호)  메뉴(M)",
 		"선택 >>", w)...)
 
-	return Join(Center(lines, termW, w))
+	return Page(lines, termW, w)
 }
 
 // maskKey는 키가 설정되어 있음만 보여준다.
