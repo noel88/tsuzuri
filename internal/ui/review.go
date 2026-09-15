@@ -42,7 +42,7 @@ func RenderFeedback(p pack.Problem, a store.Attempt, f tsync.Feedback, st Status
 		"주요명령(다음 ⏎)  메뉴(M)  종료(X)",
 		"선택 >>", w)...)
 
-	return Join(Center(lines, termW, w))
+	return Page(lines, termW, w)
 }
 
 // feedbackNotes는 error를 먼저, nuance를 나중에 그린다.

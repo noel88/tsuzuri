@@ -33,7 +33,7 @@ func RenderProblem(p pack.Problem, st Status, termW int) string {
 		"주요명령(긴 답 :e)  메뉴(M)  종료(X)",
 		"답 >>", w)...)
 
-	return Join(Center(lines, termW, w))
+	return Page(lines, termW, w)
 }
 
 // RenderResult는 제출 후 화면이다.
@@ -66,7 +66,7 @@ func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, 
 		"주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)",
 		"선택 >>", w)...)
 
-	return Join(Center(lines, termW, w))
+	return Page(lines, termW, w)
 }
 
 // resultNotes는 지적 줄들을 만든다. 짚을 것이 없으면 빈 슬라이스다.

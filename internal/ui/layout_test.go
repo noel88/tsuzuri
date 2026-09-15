@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/noel88/tsuzuri/internal/config"
 )
 
 func TestRuleCentersTitle(t *testing.T) {
@@ -101,4 +103,25 @@ func countTrailing(s string, r rune) int {
 		n++
 	}
 	return n
+}
+
+func TestScreensEndOnThePromptLine(t *testing.T) {
+	// 화면 끝에 개행이 붙으면 커서가 다음 줄 맨 왼쪽으로 내려가, 사용자가
+	// 치는 답이 프롬프트 옆이 아니라 그 아래 여백 밖에 찍힌다.
+	// 스크린샷을 찍어 보고서야 드러났다.
+	screens := map[string]string{
+		"출제":   RenderProblem(sampleProblem(), sampleStatus(), 92),
+		"결과":   RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92),
+		"초기화면": RenderMenu([]Choice{{Key: "41", Label: "ko2ja  N3 일상", Value: "2"}}, Status{}, 92),
+		"설정":   RenderSetup(config.Default(), Status{}, 92),
+	}
+	for name, out := range screens {
+		if !strings.HasSuffix(out, ">> ") {
+			tail := out
+			if len(tail) > 30 {
+				tail = tail[len(tail)-30:]
+			}
+			t.Errorf("%s 화면이 프롬프트(\">> \")로 끝나야 한다. 끝부분: %q", name, tail)
+		}
+	}
 }

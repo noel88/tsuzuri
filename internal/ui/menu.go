@@ -56,7 +56,7 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 		"주요명령(이동 번호)  5·6은 네트워크 필요  종료(X)",
 		"선택 >>", w)...)
 
-	return Join(Center(lines, termW, w))
+	return Page(lines, termW, w)
 }
 
 // ParseMenuKey는 초기화면 입력을 해석한다.
