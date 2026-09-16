@@ -10,10 +10,16 @@ type Flag struct {
 
 // Coverage는 key_points 각 항목이 답안에 나타나는지 확인한다.
 //
-// 세 가지로 매칭한다:
+// 네 가지로 매칭한다:
 //  1. 형태소의 기본형 (「思わなかった」→「思う」)
 //  2. 형태소의 표층형
 //  3. 표층을 이어붙인 문자열에 포함 (「ていた」 같은 연결 표현)
+//  4. 띄어쓰기를 무시한 비교
+//
+// 4번이 필요한 이유: 한국어 보조용언은 붙여 써도 맞다(한글 맞춤법 제47항).
+// 「앉아 있」을 요구하는 문제에 「앉아있었다」라고 답하면 맞는 답인데,
+// 띄어쓰기까지 따지면 빠졌다고 나온다. 사전형으로 적힌 핵심 표현도
+// 어간만으로 비교해서 「가져오다」와 「가져왔습니다」를 맞춘다.
 //
 // missing이 곧 오답을 뜻하지 않는다. 다른 표현으로 같은 뜻을 썼을 수 있다.
 func Coverage(tokens []Token, keyPoints []string) (covered, missing []string) {
@@ -26,6 +32,7 @@ func Coverage(tokens []Token, keyPoints []string) (covered, missing []string) {
 		joined.WriteString(t.Surface)
 	}
 	flat := joined.String()
+	tight := squeeze(flat)
 
 	covered, missing = []string{}, []string{}
 	for _, kp := range keyPoints {
@@ -33,13 +40,60 @@ func Coverage(tokens []Token, keyPoints []string) (covered, missing []string) {
 		if needle == "" {
 			continue
 		}
-		if bases[needle] || surfaces[needle] || strings.Contains(flat, needle) {
+		if matches(needle, bases, surfaces, flat, tight) {
 			covered = append(covered, kp)
 		} else {
 			missing = append(missing, kp)
 		}
 	}
 	return covered, missing
+}
+
+func matches(needle string, bases, surfaces map[string]bool, flat, tight string) bool {
+	if bases[needle] || surfaces[needle] || strings.Contains(flat, needle) {
+		return true
+	}
+	// 띄어쓰기를 무시하고 다시 본다.
+	if n := squeeze(needle); n != "" && strings.Contains(tight, n) {
+		return true
+	}
+	// 사전형으로 적힌 핵심 표현은 어미를 떼고 어간으로 본다.
+	if stem := dictionaryStem(needle); stem != "" {
+		if bases[stem] || strings.Contains(tight, squeeze(stem)) {
+			return true
+		}
+	}
+	return false
+}
+
+// squeeze는 공백을 모두 없앤다.
+func squeeze(s string) string {
+	return strings.Join(strings.Fields(s), "")
+}
+
+// dictionaryStem은 사전형 표현에서 어간을 뽑는다.
+//
+// 한국어 동사·형용사는 「가져오다」처럼 「다」로 적히는데, koreanBase는
+// 어간만(「가져오」) 돌려주므로 그대로는 만나지 못한다. 일본어에는 이런
+// 꼴이 없으므로 한글일 때만 적용한다.
+func dictionaryStem(s string) string {
+	if !strings.HasSuffix(s, "다") {
+		return ""
+	}
+	stem := strings.TrimSuffix(s, "다")
+	if stem == "" || !isHangul(stem) {
+		return ""
+	}
+	return stem
+}
+
+func isHangul(s string) bool {
+	for _, r := range s {
+		if r < 0xAC00 || r > 0xD7A3 {
+			return false
+		}
+	}
+	return true
 }
 
 // stripTilde는 key_point의 물결표를 제거한다. 「〜ていた」→「ていた」

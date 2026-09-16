@@ -125,3 +125,26 @@ func TestIsCancel(t *testing.T) {
 		}
 	}
 }
+
+// mozc가 히라가나 모드면 x를 쳐도 전각 「ｘ」가 확정된다. 그대로 두면
+// 종료하려던 입력이 답안으로 저장되고 첨삭 대기열에까지 들어간다.
+func TestParseCommandAcceptsFullWidthLetters(t *testing.T) {
+	cases := map[string]Command{
+		"ｘ": CmdQuit, "Ｘ": CmdQuit, "ｑ": CmdQuit,
+		"ｍ": CmdMenu, "ｆ": CmdPriority, "ｒ": CmdRetry,
+	}
+	for in, want := range cases {
+		if got := ParseCommand(in); got != want {
+			t.Errorf("ParseCommand(%q) = %v, 기대 %v", in, got, want)
+		}
+	}
+}
+
+func TestFullWidthCancelAndEditor(t *testing.T) {
+	if !IsCancel("：ｑ") {
+		t.Error("전각 :q도 취소여야 한다")
+	}
+	if !IsEditorRequest("：ｅ") {
+		t.Error("전각 :e도 에디터 요청이어야 한다")
+	}
+}

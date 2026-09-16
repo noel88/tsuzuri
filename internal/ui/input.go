@@ -42,7 +42,7 @@ func ReadLine(r *bufio.Reader) (string, bool, error) {
 // ParseCommand는 결과 화면의 입력을 해석한다.
 // 모르는 입력은 다음 문제로 넘어간다 — 흐름을 끊지 않는다.
 func ParseCommand(s string) Command {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	switch strings.ToLower(normalizeCommand(s)) {
 	case "f":
 		return CmdPriority
 	case "r":
@@ -56,12 +56,34 @@ func ParseCommand(s string) Command {
 	}
 }
 
+// normalizeCommand는 전각 영문자를 반각으로 바꾼다.
+//
+// mozc가 히라가나 모드면 x를 쳐도 전각 「ｘ」가 확정된다. 그대로 두면
+// 명령으로 인식되지 않고, 답안 자리에서는 그 글자가 답안으로 저장되어
+// 첨삭 대기열에까지 들어간다.
+func normalizeCommand(s string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(s) {
+		switch {
+		case r >= 'Ａ' && r <= 'Ｚ':
+			b.WriteRune(r - 'Ａ' + 'A')
+		case r >= 'ａ' && r <= 'ｚ':
+			b.WriteRune(r - 'ａ' + 'a')
+		case r == '：':
+			b.WriteRune(':')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // IsCancel은 지금 하던 일을 그만두겠다는 입력인지 본다.
 //
 // 값을 묻는 프롬프트에서는 m이나 x도 값으로 읽혀야 하므로(주제가 "x"일 수
 // 있다) 콜론을 붙인 :q 와 :quit 만 취소로 본다. 답안 자리의 :e 와 같은 꼴이다.
 func IsCancel(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	switch strings.ToLower(normalizeCommand(s)) {
 	case ":q", ":quit", ":cancel":
 		return true
 	}
@@ -70,7 +92,7 @@ func IsCancel(s string) bool {
 
 // IsEditorRequest는 답안 자리에 ":e"가 입력됐는지 본다.
 func IsEditorRequest(s string) bool {
-	return strings.TrimSpace(s) == ":e"
+	return normalizeCommand(s) == ":e"
 }
 
 // ReadFromEditor는 임시 파일을 에디터로 열고, 저장된 내용을 돌려준다.
