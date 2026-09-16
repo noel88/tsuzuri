@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -91,4 +92,77 @@ func TestQueueItemRoundTrips(t *testing.T) {
 	if len(got) != 1 || got[0].AttemptID != "a001" || !got[0].Priority {
 		t.Errorf("QueueItem 왕복 실패: %+v", got)
 	}
+}
+
+// 전원이 끊겨 줄이 잘린 뒤에도 파일이 계속 쓸 수 있어야 한다.
+//
+// 조각에 다음 기록이 들러붙으면 그 줄은 더 이상 마지막 줄이 아니게 되고,
+// ReadAll이 파일 전체를 거부해 앱이 시작조차 못 한다.
+func TestAppendHealsTornLastLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "queue.jsonl")
+	if err := Append(path, QueueItem{AttemptID: "a001"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendRaw(path, `{"attempt_id":"a002","prio`); err != nil {
+		t.Fatal(err)
+	}
+	// 조각은 개행 없이 끝난다. 여기서 전원이 끊긴 상황이다.
+	if err := truncateFinalNewline(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Append(path, QueueItem{AttemptID: "a003"}); err != nil {
+		t.Fatalf("잘린 파일에도 이어 쓸 수 있어야 한다: %v", err)
+	}
+	if err := Append(path, QueueItem{AttemptID: "a004"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadAll[QueueItem](path)
+	if err != nil {
+		t.Fatalf("이후 읽기가 실패하면 앱이 시작조차 못 한다: %v", err)
+	}
+	var ids []string
+	for _, q := range got {
+		ids = append(ids, q.AttemptID)
+	}
+	want := []string{"a001", "a003", "a004"}
+	if len(ids) != len(want) {
+		t.Fatalf("항목 = %v, 기대 %v (잘린 a002만 사라져야 한다)", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Errorf("항목 = %v, 기대 %v", ids, want)
+			break
+		}
+	}
+}
+
+func TestAppendHealsFileWithNoNewlineAtAll(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attempts.jsonl")
+	if err := os.WriteFile(path, []byte(`{"id":"a001"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(path, Attempt{ID: "a002"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadAll[Attempt](path)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "a002" {
+		t.Errorf("조각만 버리고 새 기록은 남아야 한다: %+v", got)
+	}
+}
+
+// truncateFinalNewline은 파일 끝의 개행 하나를 지워 잘린 쓰기를 흉내낸다.
+func truncateFinalNewline(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	return os.WriteFile(path, b, 0o644)
 }

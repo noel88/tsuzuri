@@ -46,6 +46,29 @@ type Problem struct {
 	Style     Style     `json:"style"`
 }
 
+// Skip은 읽지 못해 건너뛴 팩 파일이다.
+//
+// 팩 하나가 깨졌다고 앱이 시작조차 못 하면 안 된다. 건너뛰되 무엇을 왜
+// 건너뛰었는지 알려서, 사용자가 그 팩을 고치거나 지울 수 있게 한다.
+type Skip struct {
+	Path   string
+	Reason string
+}
+
+// isSidecar는 팩이 아닌데 팩 디렉터리에 생기는 파일인지 본다.
+//
+// macOS는 FAT 카드에 파일을 쓸 때 확장 속성을 담은 AppleDouble 파일
+// `._<이름>`을 같이 만든다. deploy/README가 권하는 방식(맥에서 SD에 복사)을
+// 그대로 따르면 반드시 생긴다.
+func isSidecar(name string) bool {
+	return strings.HasPrefix(name, "._") || name == ".DS_Store"
+}
+
+// trimBOM은 손으로 만든 파일에 붙은 UTF-8 BOM을 떼어낸다.
+func trimBOM(s string) string {
+	return strings.TrimPrefix(s, "\ufeff")
+}
+
 // Load는 JSON Lines 팩 파일 하나를 읽는다. 빈 줄은 건너뛴다.
 func Load(path string) ([]Problem, error) {
 	f, err := os.Open(path)
@@ -60,7 +83,7 @@ func Load(path string) ([]Problem, error) {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for line := 1; sc.Scan(); line++ {
-		text := strings.TrimSpace(sc.Text())
+		text := strings.TrimSpace(trimBOM(sc.Text()))
 		if text == "" {
 			continue
 		}
@@ -80,23 +103,28 @@ func Load(path string) ([]Problem, error) {
 //
 // 답안은 문제 ID만 기억하므로, ID가 겹치면 엉뚱한 문제로 채점하고
 // 그 비용까지 청구된다. 겹치는 ID를 만나면 오류로 보고한다.
-func ByID(dir string) (map[string]Problem, error) {
+func ByID(dir string) (map[string]Problem, []Skip, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Strings(paths)
 
 	out := map[string]Problem{}
 	from := map[string]string{}
+	var skipped []Skip
 	for _, path := range paths {
+		if isSidecar(filepath.Base(path)) {
+			continue
+		}
 		ps, err := Load(path)
 		if err != nil {
-			return nil, err
+			skipped = append(skipped, Skip{Path: path, Reason: err.Error()})
+			continue
 		}
 		for _, p := range ps {
 			if prev, dup := from[p.ID]; dup {
-				return nil, fmt.Errorf(
+				return nil, nil, fmt.Errorf(
 					"문제 id %q가 %s와 %s에 겹칩니다. 한쪽 팩을 옮기거나 지우세요",
 					p.ID, filepath.Base(prev), filepath.Base(path))
 			}
@@ -104,21 +132,29 @@ func ByID(dir string) (map[string]Problem, error) {
 			out[p.ID] = p
 		}
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // LoadDir은 디렉터리의 모든 .jsonl을 읽어 방향이 일치하는 문제만 돌려준다.
 // 한 세션은 한 방향만 다루므로 사전도 하나만 상주하게 된다.
-func LoadDir(dir string, d Direction) ([]Problem, error) {
+func LoadDir(dir string, d Direction) ([]Problem, []Skip, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	sort.Strings(paths)
+
 	var out []Problem
+	var skipped []Skip
 	for _, p := range paths {
+		if isSidecar(filepath.Base(p)) {
+			continue
+		}
 		ps, err := Load(p)
 		if err != nil {
-			return nil, err
+			// 팩 하나가 깨져도 나머지로 계속 쓸 수 있어야 한다.
+			skipped = append(skipped, Skip{Path: p, Reason: err.Error()})
+			continue
 		}
 		for _, pr := range ps {
 			if pr.Dir == d {
@@ -126,5 +162,5 @@ func LoadDir(dir string, d Direction) ([]Problem, error) {
 			}
 		}
 	}
-	return out, nil
+	return out, skipped, nil
 }

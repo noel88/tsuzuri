@@ -37,7 +37,7 @@ func Write(dataDir string, now time.Time) (string, int, error) {
 		byID[a.ID] = a
 	}
 
-	problems, err := pack.ByID(filepath.Join(dataDir, "packs"))
+	problems, _, err := pack.ByID(filepath.Join(dataDir, "packs"))
 	if err != nil {
 		return "", 0, err
 	}

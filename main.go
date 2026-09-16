@@ -46,6 +46,9 @@ type app struct {
 	// 마지막 온라인 작업이 성공했는지. 초기화면 상태 표시에 쓴다.
 	online bool
 
+	// 이미 알린 팩 경로. 같은 경고를 메뉴마다 반복하지 않는다.
+	warned map[string]bool
+
 	// 사전은 한 번에 하나만 상주시킨다.
 	//
 	// 측정: 일본어(IPADIC) 88MB + 한국어(ko-dic) 211MB = 300MB 라이브 힙.
@@ -66,6 +69,7 @@ func newApp() *app {
 		termW:      ui.TermWidth(),
 		in:         bufio.NewReader(os.Stdin),
 		out:        os.Stdout,
+		warned:     map[string]bool{},
 	}
 }
 
@@ -285,10 +289,11 @@ func (a *app) review() (bool, error) {
 	for _, at := range attempts {
 		byID[at.ID] = at
 	}
-	problems, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
+	problems, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
 	if err != nil {
 		return false, err
 	}
+	a.reportSkipped(skipped)
 
 	for i, f := range feedback {
 		at, ok := byID[f.AttemptID]
@@ -467,10 +472,11 @@ func (a *app) onlineClient(c config.Config) (llm.Client, error) {
 func (a *app) loadPackSets() ([]packSet, error) {
 	var sets []packSet
 	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
-		ps, err := pack.LoadDir(filepath.Join(a.dataDir, "packs"), d)
+		ps, skipped, err := pack.LoadDir(filepath.Join(a.dataDir, "packs"), d)
 		if err != nil {
 			return nil, err
 		}
+		a.reportSkipped(skipped)
 		if len(ps) == 0 {
 			continue
 		}
@@ -496,6 +502,20 @@ func (a *app) status(sets []packSet) (ui.Status, error) {
 		total += len(s.problems)
 	}
 	return ui.Status{Total: total, QueueLen: len(queue), Feedback: len(feedback), Online: a.online}, nil
+}
+
+// reportSkipped는 읽지 못한 팩을 알린다. 같은 파일을 두 번 알리지 않는다.
+func (a *app) reportSkipped(skipped []pack.Skip) {
+	for _, s := range skipped {
+		if a.warned[s.Path] {
+			continue
+		}
+		if a.warned == nil {
+			a.warned = map[string]bool{}
+		}
+		a.warned[s.Path] = true
+		a.notice(fmt.Sprintf("팩을 건너뜁니다: %s\n  %s", filepath.Base(s.Path), s.Reason))
+	}
 }
 
 func (a *app) notice(msg string) {

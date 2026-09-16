@@ -2,9 +2,11 @@ package store
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"strings"
@@ -42,17 +44,66 @@ func Append(path string, v any) error {
 }
 
 func appendRaw(path, line string) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
+	// 이전 쓰기가 전원 차단으로 잘려 있으면 그 조각을 먼저 잘라낸다.
+	//
+	// 그냥 이어 붙이면 다음 기록이 조각에 들러붙어 한 줄이 되고, 그 줄은
+	// 더 이상 마지막 줄이 아니게 된다. ReadAll은 마지막 줄의 손상만
+	// 허용하므로 그때부터 파일 전체를 읽지 못하고 앱이 시작조차 못 한다.
+	end, err := truncateTornTail(f)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Seek(end, io.SeekStart); err != nil {
+		return err
+	}
 
 	if _, err := f.WriteString(line + "\n"); err != nil {
 		return err
 	}
 	// 포메라는 예고 없이 꺼진다. 매 쓰기마다 디스크까지 내린다.
 	return f.Sync()
+}
+
+// truncateTornTail은 마지막 개행 뒤에 남은 조각을 잘라내고,
+// 이어 쓸 위치를 돌려준다. 파일이 온전하면 크기를 그대로 돌려준다.
+func truncateTornTail(f *os.File) (int64, error) {
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	size := fi.Size()
+	if size == 0 {
+		return 0, nil
+	}
+
+	// 끝에서부터 개행을 찾는다. 한 줄이 아주 길 수 있으므로 블록 단위로 본다.
+	const block = 64 * 1024
+	buf := make([]byte, block)
+	for pos := size; pos > 0; {
+		n := int64(block)
+		if pos < n {
+			n = pos
+		}
+		pos -= n
+		if _, err := f.ReadAt(buf[:n], pos); err != nil {
+			return 0, err
+		}
+		if i := bytes.LastIndexByte(buf[:n], '\n'); i >= 0 {
+			end := pos + int64(i) + 1
+			if end == size {
+				return size, nil // 온전하다
+			}
+			return end, f.Truncate(end)
+		}
+	}
+	// 개행이 하나도 없다 — 파일 전체가 조각이다.
+	return 0, f.Truncate(0)
 }
 
 // ReadAll은 JSON Lines 파일 전체를 읽는다.
