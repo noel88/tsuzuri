@@ -190,7 +190,7 @@ func TestWritePackNamespacesIDsPerPack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	byID, err := pack.ByID(dir)
+	byID, _, err := pack.ByID(dir)
 	if err != nil {
 		t.Fatalf("두 팩의 ID가 겹치면 안 된다: %v", err)
 	}

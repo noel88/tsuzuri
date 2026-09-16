@@ -98,8 +98,20 @@ func TestRunPrioritySetsQueueFlag(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	queue, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
-	if len(queue) == 0 || !queue[0].Priority {
-		t.Errorf("F 입력 시 Priority가 true여야 한다: %+v", queue)
+	// 큐는 append-only다. 답안을 낼 때 한 줄, F를 누르면 우선 표시로 한 줄
+	// 더 쌓인다. sync가 답안 단위로 합쳐 한 번만 보낸다.
+	var first string
+	var flagged bool
+	for _, q := range queue {
+		if first == "" {
+			first = q.AttemptID
+		}
+		if q.AttemptID == first && q.Priority {
+			flagged = true
+		}
+	}
+	if !flagged {
+		t.Errorf("F 입력 시 그 답안에 우선 표시가 남아야 한다: %+v", queue)
 	}
 }
 
@@ -179,5 +191,28 @@ func TestRunFinishesAllProblems(t *testing.T) {
 	attempts, _ := store.ReadAll[store.Attempt](filepath.Join(dir, "attempts.jsonl"))
 	if len(attempts) != 2 {
 		t.Errorf("두 문제를 모두 풀어야 한다: %d", len(attempts))
+	}
+}
+
+// 결과 화면에서 덮개를 닫거나 Ctrl+C를 누른 답안도 첨삭을 받을 수 있어야 한다.
+// 큐 적재를 결과 화면 입력 뒤로 미루면 그 답안은 영영 첨삭받지 못한다.
+func TestRunQueuesBeforeShowingResult(t *testing.T) {
+	dir := t.TempDir()
+	// 답만 넣고 결과 화면의 입력은 주지 않는다(입력이 끊긴 상황).
+	s, _ := newSession(t, dir, "昨日カフェに行った。\n")
+	if _, err := s.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	attempts, _ := store.ReadAll[store.Attempt](filepath.Join(dir, "attempts.jsonl"))
+	queue, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
+	if len(attempts) != 1 {
+		t.Fatalf("답안이 저장되어야 한다: %d", len(attempts))
+	}
+	if len(queue) != 1 {
+		t.Fatalf("답안이 큐에도 들어가야 한다: %d", len(queue))
+	}
+	if queue[0].AttemptID != attempts[0].ID {
+		t.Errorf("큐가 그 답안을 가리켜야 한다: %q vs %q", queue[0].AttemptID, attempts[0].ID)
 	}
 }

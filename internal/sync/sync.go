@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/noel88/tsuzuri/internal/llm"
@@ -77,9 +78,35 @@ var feedbackSchema = map[string]any{
 
 // Result는 한 번의 sync 결과다.
 type Result struct {
-	Processed int // 첨삭을 받은 건수
-	Failed    int // 호출이 실패해 큐에 남긴 건수
-	Missing   int // 문제를 찾지 못해 큐에 남긴 건수
+	Processed int  // 첨삭을 받은 건수
+	Failed    int  // 일시적 실패로 큐에 남긴 건수
+	Missing   int  // 문제를 찾지 못해 큐에 남긴 건수
+	Dropped   int  // 다시 시도해도 같을 실패라 큐에서 뺀 건수
+	Aborted   bool // 연속 실패로 중단했는지
+}
+
+// maxConsecutiveFailures는 이만큼 연달아 실패하면 나머지를 포기한다.
+//
+// Wi-Fi가 끊긴 채로 큐에 쌓인 100건을 계속 시도하면, 화면에는 "받아오는
+// 중입니다..."만 떠 있고 빠져나갈 길은 Ctrl+C뿐이다. 호출마다 시간도
+// 비용도 든다.
+const maxConsecutiveFailures = 3
+
+// permanent는 다시 시도해도 결과가 같을 실패인지 본다.
+//
+// 토큰 한도에 걸린 답안을 그대로 큐에 두면 sync할 때마다 같은 금액을
+// 다시 내고 같은 곳에서 실패한다.
+func permanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, sign := range []string{"토큰 한도", "거부되었습니다", "구조화된 응답"} {
+		if strings.Contains(msg, sign) {
+			return true
+		}
+	}
+	return false
 }
 
 // Run은 큐에 쌓인 답안의 첨삭을 받아 feedback.jsonl에 append한다.
@@ -122,20 +149,39 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		return Result{}, err
 	}
 
+	// 같은 답안이 큐에 여러 줄 있을 수 있다. 우선 표시는 나중에 한 줄 더
+	// 남기는 방식이기 때문이다. 답안 단위로 합치지 않으면 같은 답안을
+	// 두 번 보내 두 배로 과금된다.
 	pending := make([]store.QueueItem, 0, len(queue))
+	seen := map[string]int{}
 	for _, q := range queue {
-		if !already[q.AttemptID] {
-			pending = append(pending, q)
+		if already[q.AttemptID] {
+			continue
 		}
+		if i, dup := seen[q.AttemptID]; dup {
+			if q.Priority {
+				pending[i].Priority = true
+			}
+			continue
+		}
+		seen[q.AttemptID] = len(pending)
+		pending = append(pending, q)
 	}
 	// 우선 표시된 항목을 먼저 처리한다.
 	sort.SliceStable(pending, func(i, j int) bool {
 		return pending[i].Priority && !pending[j].Priority
 	})
 
-	processed, missing := 0, 0
+	processed, missing, dropped := 0, 0, 0
+	consecutive := 0
+	aborted := false
 	var failed []store.QueueItem
-	for _, q := range pending {
+	for i, q := range pending {
+		if aborted {
+			// 남은 항목은 손대지 않고 큐에 그대로 둔다.
+			failed = append(failed, pending[i:]...)
+			break
+		}
 		a, ok := byID[q.AttemptID]
 		if !ok {
 			// 답안 자체가 없으면 첨삭할 대상이 없다. 큐에서 버린다.
@@ -153,18 +199,35 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		}
 		fb, err := review(ctx, c, p, a, now())
 		if err != nil {
-			// 실패한 것은 큐에 남긴다. 네트워크가 한 번 흔들렸다고
+			if permanent(err) {
+				// 다시 보내도 같은 곳에서 같은 금액을 잃는다. 큐에서 뺀다.
+				dropped++
+				consecutive = 0
+				continue
+			}
+			// 일시적 실패는 큐에 남긴다. 네트워크가 한 번 흔들렸다고
 			// 그 답안이 영영 첨삭받지 못하면 안 된다.
 			failed = append(failed, q)
+			consecutive++
+			if consecutive >= maxConsecutiveFailures {
+				aborted = true
+			}
 			continue
 		}
+		consecutive = 0
 		if err := store.Append(feedbackPath, fb); err != nil {
 			return Result{Processed: processed}, err
 		}
 		processed++
 	}
 
-	res := Result{Processed: processed, Failed: len(failed) - missing, Missing: missing}
+	res := Result{
+		Processed: processed,
+		Failed:    len(failed) - missing,
+		Missing:   missing,
+		Dropped:   dropped,
+		Aborted:   aborted,
+	}
 	if err := rewriteQueue(queuePath, failed); err != nil {
 		return res, err
 	}

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,5 +254,87 @@ func TestRunLeavesNoTempFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "queue.jsonl.tmp")); !os.IsNotExist(err) {
 		t.Error("임시 파일이 남으면 안 된다")
+	}
+}
+
+// 큐는 append-only라 같은 답안이 여러 줄 있을 수 있다(우선 표시).
+// 합치지 않으면 같은 답안을 두 번 보내 두 배로 과금된다.
+func TestRunCollapsesDuplicateQueueLines(t *testing.T) {
+	dir := seed(t)
+	writeJSONL(t, filepath.Join(dir, "queue.jsonl"), store.QueueItem{
+		AttemptID: "a001", Priority: true, At: fixedNow(),
+	})
+
+	f := &llm.FakeClient{Reply: feedbackReply}
+	res, err := Run(context.Background(), f, dir, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Processed != 1 {
+		t.Errorf("한 번만 처리해야 한다: %+v", res)
+	}
+	if f.Calls != 1 {
+		t.Errorf("API 호출 = %d회, 기대 1회 — 중복 호출은 두 배 과금이다", f.Calls)
+	}
+	got, _ := store.ReadAll[Feedback](filepath.Join(dir, "feedback.jsonl"))
+	if len(got) != 1 {
+		t.Errorf("첨삭도 한 건이어야 한다: %d", len(got))
+	}
+}
+
+// 토큰 한도처럼 다시 보내도 같을 실패를 큐에 두면, sync할 때마다 같은
+// 금액을 다시 내고 같은 곳에서 실패한다.
+func TestRunDropsPermanentFailures(t *testing.T) {
+	dir := seed(t)
+	f := &llm.FakeClient{Err: errors.New("응답이 토큰 한도에서 잘렸습니다. 팩 크기를 줄여 보세요")}
+
+	res, err := Run(context.Background(), f, dir, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Dropped != 1 || res.Failed != 0 {
+		t.Errorf("영구 실패로 분류해야 한다: %+v", res)
+	}
+	q, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
+	if len(q) != 0 {
+		t.Errorf("큐에서 빠져야 한다: %+v", q)
+	}
+
+	// 두 번째 sync는 아무것도 보내지 않아야 한다.
+	before := f.Calls
+	if _, err := Run(context.Background(), f, dir, fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if f.Calls != before {
+		t.Errorf("다시 보내면 안 된다: %d → %d", before, f.Calls)
+	}
+}
+
+// 네트워크가 끊긴 채로 큐에 쌓인 항목을 전부 시도하면 시간도 비용도 든다.
+func TestRunAbortsAfterConsecutiveFailures(t *testing.T) {
+	dir := seed(t)
+	at := fixedNow()
+	for i := 2; i <= 10; i++ {
+		id := fmt.Sprintf("a%03d", i)
+		writeJSONL(t, filepath.Join(dir, "attempts.jsonl"), store.Attempt{
+			ID: id, PackID: "p001", At: at, Answer: "답안",
+		})
+		writeJSONL(t, filepath.Join(dir, "queue.jsonl"), store.QueueItem{AttemptID: id, At: at})
+	}
+
+	f := &llm.FakeClient{Err: errors.New("connection reset by peer")}
+	res, err := Run(context.Background(), f, dir, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Aborted {
+		t.Errorf("연달아 실패하면 중단해야 한다: %+v", res)
+	}
+	if f.Calls > maxConsecutiveFailures {
+		t.Errorf("호출 = %d회, %d회 넘게 시도하면 안 된다", f.Calls, maxConsecutiveFailures)
+	}
+	q, _ := store.ReadAll[store.QueueItem](filepath.Join(dir, "queue.jsonl"))
+	if len(q) != 10 {
+		t.Errorf("일시적 실패는 전부 큐에 남아야 한다: %d건", len(q))
 	}
 }

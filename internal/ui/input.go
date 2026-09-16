@@ -56,6 +56,18 @@ func ParseCommand(s string) Command {
 	}
 }
 
+// IsCancel은 지금 하던 일을 그만두겠다는 입력인지 본다.
+//
+// 값을 묻는 프롬프트에서는 m이나 x도 값으로 읽혀야 하므로(주제가 "x"일 수
+// 있다) 콜론을 붙인 :q 와 :quit 만 취소로 본다. 답안 자리의 :e 와 같은 꼴이다.
+func IsCancel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case ":q", ":quit", ":cancel":
+		return true
+	}
+	return false
+}
+
 // IsEditorRequest는 답안 자리에 ":e"가 입력됐는지 본다.
 func IsEditorRequest(s string) bool {
 	return strings.TrimSpace(s) == ":e"
