@@ -102,11 +102,9 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 		Strict: anthropic.Bool(true),
 	}
 
-	adaptive := anthropic.ThinkingConfigAdaptiveParam{}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(a.model),
 		MaxTokens: maxTokens,
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive},
 		System: []anthropic.TextBlockParam{{
 			Text:         req.System,
 			CacheControl: anthropic.NewCacheControlEphemeralParam(),
@@ -115,6 +113,12 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 			anthropic.NewUserMessage(anthropic.NewTextBlock(req.User)),
 		},
 		Tools: []anthropic.ToolUnionParam{{OfTool: &tool}},
+	}
+	// 적응형 사고를 지원하지 않는 모델에 보내면 400으로 거절당해
+	// 온라인 기능이 통째로 막힌다.
+	if supportsAdaptiveThinking(a.model) {
+		adaptive := anthropic.ThinkingConfigAdaptiveParam{}
+		params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &adaptive}
 	}
 
 	// 긴 출력이 HTTP 타임아웃에 걸리지 않도록 스트리밍으로 받아 누적한다.
@@ -199,6 +203,14 @@ func extractJSON(msg anthropic.Message) (string, error) {
 		return "", fmt.Errorf("요청이 거부되었습니다: %s", msg.StopDetails.Explanation)
 	}
 	return "", fmt.Errorf("구조화된 응답을 받지 못했습니다 (stop_reason=%q)", msg.StopReason)
+}
+
+// supportsAdaptiveThinking은 그 모델이 thinking {type: adaptive}를 받는지 본다.
+//
+// Haiku 계열은 받지 않는다. 설정에서 모델 이름을 자유롭게 적을 수 있으므로,
+// 모르는 이름은 보내 보는 쪽(적응형 사용)을 기본으로 두고 Haiku만 뺀다.
+func supportsAdaptiveThinking(model string) bool {
+	return !strings.Contains(strings.ToLower(model), "haiku")
 }
 
 // isEmptyInput은 툴 입력이 비어 있는지 본다.

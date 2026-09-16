@@ -87,10 +87,24 @@ func TestGenerateRejectsEmptyReference(t *testing.T) {
 	}
 }
 
-func TestGenerateRejectsDuplicateIDs(t *testing.T) {
+// 문항 하나가 불량이라고 팩 전체를 버리면, 이미 값을 치른 생성 결과를
+// 통째로 잃는다. 쓸 수 있는 것은 살린다.
+func TestGenerateDropsBadItemsAndKeepsTheRest(t *testing.T) {
+	// 둘째 문항의 id가 첫째와 겹친다.
 	f := &llm.FakeClient{Reply: strings.ReplaceAll(goodReply, `"x2"`, `"x1"`)}
+	got, err := Generate(context.Background(), f, spec())
+	if err != nil {
+		t.Fatalf("쓸 수 있는 문항이 있으면 실패하면 안 된다: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "x1" {
+		t.Errorf("겹치는 문항만 버려야 한다: %+v", got)
+	}
+}
+
+func TestGenerateFailsOnlyWhenNothingIsUsable(t *testing.T) {
+	f := &llm.FakeClient{Reply: `{"problems":[{"id":"x1","dir":"ko2ja","prompt":"질문","reference":"","style":"plain"}]}`}
 	if _, err := Generate(context.Background(), f, spec()); err == nil {
-		t.Error("id가 겹치면 답안이 어느 문제 것인지 알 수 없다")
+		t.Error("쓸 수 있는 문항이 하나도 없으면 오류여야 한다")
 	}
 }
 
@@ -204,5 +218,23 @@ func TestWritePackCreatesDirectory(t *testing.T) {
 	ps := []pack.Problem{{ID: "x1", Dir: pack.KoToJa, Prompt: "a", Reference: "b", Style: pack.StylePlain}}
 	if _, err := WritePack(dir, spec(), ps, at()); err != nil {
 		t.Errorf("없는 디렉터리를 만들어야 한다: %v", err)
+	}
+}
+
+// 레벨·주제는 사용자가 자유롭게 적는다. 파일 이름에 쓸 수 없는 글자가
+// 들어가면 방금 값을 치른 팩을 저장하지 못하고 잃는다.
+func TestWritePackSurvivesAwkwardLevelNames(t *testing.T) {
+	dir := t.TempDir()
+	ps := []pack.Problem{{ID: "x1", Dir: pack.KoToJa, Prompt: "a", Reference: "b", Style: pack.StylePlain}}
+	for _, level := range []string{"N3/N4", "일상: 카페", "  ", "a*b?c"} {
+		s := Spec{Dir: pack.KoToJa, Level: level, Topic: "일상", Count: 1}
+		path, err := WritePack(dir, s, ps, at())
+		if err != nil {
+			t.Errorf("레벨 %q에서 저장 실패: %v", level, err)
+			continue
+		}
+		if _, err := pack.Load(path); err != nil {
+			t.Errorf("레벨 %q로 만든 팩을 읽지 못한다: %v", level, err)
+		}
 	}
 }

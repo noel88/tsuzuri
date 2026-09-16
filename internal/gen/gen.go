@@ -94,17 +94,27 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 	if len(out.Problems) == 0 {
 		return nil, fmt.Errorf("문항이 하나도 오지 않았습니다")
 	}
+	// 문항 하나가 불량이라고 팩 전체를 버리지 않는다. 이미 값을 치른
+	// 생성 결과이므로, 쓸 수 있는 것은 살리고 몇 개를 버렸는지 알린다.
 	seen := map[string]bool{}
+	kept := make([]pack.Problem, 0, len(out.Problems))
+	var bad []string
 	for i, p := range out.Problems {
 		if err := validate(p, s); err != nil {
-			return nil, fmt.Errorf("%d번째 문항: %w", i+1, err)
+			bad = append(bad, fmt.Sprintf("%d번째(%v)", i+1, err))
+			continue
 		}
 		if seen[p.ID] {
-			return nil, fmt.Errorf("%d번째 문항: id %q가 중복입니다", i+1, p.ID)
+			bad = append(bad, fmt.Sprintf("%d번째(id %q 중복)", i+1, p.ID))
+			continue
 		}
 		seen[p.ID] = true
+		kept = append(kept, p)
 	}
-	return out.Problems, nil
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("쓸 수 있는 문항이 없습니다: %s", strings.Join(bad, ", "))
+	}
+	return kept, nil
 }
 
 func directionLabel(d pack.Direction) string {
@@ -133,12 +143,36 @@ func validate(p pack.Problem, s Spec) error {
 	return nil
 }
 
+// safeName은 파일 이름에 쓸 수 없는 글자를 바꾼다.
+func safeName(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "pack"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|', 0:
+			b.WriteRune('-')
+		default:
+			if r < 0x20 {
+				b.WriteRune('-')
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
 // WritePack은 팩을 새 파일로 쓴다. 기존 팩을 절대 덮지 않는다.
 func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	base := fmt.Sprintf("%s-%s-%s", s.Dir, s.Level, now.Format("20060102-150405"))
+	// 레벨·주제는 사용자가 자유롭게 적는다. 파일 이름에 쓸 수 없는 글자가
+	// 들어가면 방금 값을 치른 팩을 저장하지 못하고 잃는다.
+	base := fmt.Sprintf("%s-%s-%s", s.Dir, safeName(s.Level), now.Format("20060102-150405"))
 	path := filepath.Join(dir, base+".jsonl")
 	// 이름이 겹치면 번호를 붙인다. NotExist가 아닌 오류(권한, SD카드 I/O)는
 	// 이름을 바꿔도 사라지지 않으므로 루프를 빠져나가 O_EXCL이 판정하게 한다.

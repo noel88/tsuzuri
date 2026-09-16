@@ -99,10 +99,21 @@ func Load(path string) ([]Problem, error) {
 	return out, nil
 }
 
+// firstDuplicate는 이미 쓰인 id가 있는지 본다.
+func firstDuplicate(ps []Problem, from map[string]string) (string, bool) {
+	for _, p := range ps {
+		if prev, dup := from[p.ID]; dup {
+			return prev, true
+		}
+	}
+	return "", false
+}
+
 // ByID는 디렉터리의 모든 팩을 읽어 ID로 찾을 수 있는 map을 만든다.
 //
 // 답안은 문제 ID만 기억하므로, ID가 겹치면 엉뚱한 문제로 채점하고
-// 그 비용까지 청구된다. 겹치는 ID를 만나면 오류로 보고한다.
+// 그 비용까지 청구된다. 겹치는 팩은 통째로 건너뛰고 무엇을 건너뛰었는지
+// 알린다. LoadDir도 같은 팩을 건너뛰므로 드릴에도 나오지 않는다.
 func ByID(dir string) (map[string]Problem, []Skip, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
@@ -122,12 +133,14 @@ func ByID(dir string) (map[string]Problem, []Skip, error) {
 			skipped = append(skipped, Skip{Path: path, Reason: err.Error()})
 			continue
 		}
+		if prev, dup := firstDuplicate(ps, from); dup {
+			skipped = append(skipped, Skip{
+				Path:   path,
+				Reason: fmt.Sprintf("문제 id가 %s와 겹칩니다", filepath.Base(prev)),
+			})
+			continue
+		}
 		for _, p := range ps {
-			if prev, dup := from[p.ID]; dup {
-				return nil, nil, fmt.Errorf(
-					"문제 id %q가 %s와 %s에 겹칩니다. 한쪽 팩을 옮기거나 지우세요",
-					p.ID, filepath.Base(prev), filepath.Base(path))
-			}
 			from[p.ID] = path
 			out[p.ID] = p
 		}
@@ -146,6 +159,7 @@ func LoadDir(dir string, d Direction) ([]Problem, []Skip, error) {
 
 	var out []Problem
 	var skipped []Skip
+	from := map[string]string{}
 	for _, p := range paths {
 		if isSidecar(filepath.Base(p)) {
 			continue
@@ -156,7 +170,19 @@ func LoadDir(dir string, d Direction) ([]Problem, []Skip, error) {
 			skipped = append(skipped, Skip{Path: p, Reason: err.Error()})
 			continue
 		}
+		// id가 겹치는 팩은 통째로 건너뛴다.
+		//
+		// 드릴에서만 허용하고 나중에 막으면, 사용자가 겹친 팩을 지운 뒤
+		// 남은 팩의 문제로 채점되어 엉뚱한 첨삭에 값을 치르게 된다.
+		if prev, dup := firstDuplicate(ps, from); dup {
+			skipped = append(skipped, Skip{
+				Path:   p,
+				Reason: fmt.Sprintf("문제 id가 %s와 겹칩니다", filepath.Base(prev)),
+			})
+			continue
+		}
 		for _, pr := range ps {
+			from[pr.ID] = p
 			if pr.Dir == d {
 				out = append(out, pr)
 			}
