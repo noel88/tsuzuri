@@ -196,6 +196,7 @@ func (a *app) drill(set packSet) (bool, error) {
 		In:       a.in,
 		Out:      a.out,
 		TermW:    a.termW,
+		Online:   a.online,
 	}
 	outcome, err := s.Run()
 	if err != nil {
@@ -507,11 +508,18 @@ func (a *app) fetchFeedback() error {
 		if res.Aborted {
 			msg += "\n  연달아 실패해서 나머지는 보내지 않았습니다. 네트워크를 확인하세요."
 		}
+		if res.LastError != "" {
+			msg += "\n  마지막 오류: " + res.LastError
+		}
 		a.notice(msg)
 	}
 	if res.Dropped > 0 {
-		a.notice(fmt.Sprintf("%d건은 다시 보내도 같은 이유로 실패해서 큐에서 뺐습니다. "+
-			"답안은 남아 있습니다.", res.Dropped))
+		msg := fmt.Sprintf("%d건은 다시 보내도 같은 이유로 실패해서 큐에서 뺐습니다. "+
+			"답안은 남아 있습니다.", res.Dropped)
+		if res.LastError != "" {
+			msg += "\n  사유: " + res.LastError
+		}
+		a.notice(msg)
 	}
 	if res.Missing > 0 {
 		a.notice(fmt.Sprintf("%d건은 문제를 찾지 못했습니다. packs/ 에서 팩이 지워졌는지 확인하세요. "+

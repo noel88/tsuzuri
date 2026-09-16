@@ -80,12 +80,37 @@ func TestByIDDetectsCollisionAcrossPacks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, _, err := ByID(dir)
-	if err == nil {
-		t.Fatal("겹치는 id는 오류로 보고해야 한다")
+	got, skipped, err := ByID(dir)
+	if err != nil {
+		t.Fatalf("겹친다고 앱이 멈추면 안 된다: %v", err)
 	}
-	if !strings.Contains(err.Error(), "p001") {
-		t.Errorf("어떤 id가 겹치는지 알려야 한다: %v", err)
+	if len(got) != 1 {
+		t.Errorf("먼저 읽은 팩만 남아야 한다: %v", got)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Reason, "겹칩니다") {
+		t.Fatalf("겹친 팩을 건너뛰었다고 알려야 한다: %+v", skipped)
+	}
+}
+
+// id가 겹치는 팩을 드릴에서만 허용하면, 사용자가 겹친 팩을 지운 뒤 남은
+// 팩의 문제로 채점되어 엉뚱한 첨삭에 값을 치르게 된다. 드릴에서도 뺀다.
+func TestLoadDirSkipsPacksWithCollidingIDs(t *testing.T) {
+	dir := t.TempDir()
+	line := `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	for _, name := range []string{"a.jsonl", "b.jsonl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, skipped, err := LoadDir(dir, KoToJa)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("겹친 문제가 드릴에 두 번 나오면 안 된다: %+v", got)
+	}
+	if len(skipped) != 1 {
+		t.Errorf("건너뛴 팩을 알려야 한다: %+v", skipped)
 	}
 }
 

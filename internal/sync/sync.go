@@ -78,11 +78,12 @@ var feedbackSchema = map[string]any{
 
 // Result는 한 번의 sync 결과다.
 type Result struct {
-	Processed int  // 첨삭을 받은 건수
-	Failed    int  // 일시적 실패로 큐에 남긴 건수
-	Missing   int  // 문제를 찾지 못해 큐에 남긴 건수
-	Dropped   int  // 다시 시도해도 같을 실패라 큐에서 뺀 건수
-	Aborted   bool // 연속 실패로 중단했는지
+	Processed int    // 첨삭을 받은 건수
+	Failed    int    // 일시적 실패로 큐에 남긴 건수
+	Missing   int    // 문제를 찾지 못해 큐에 남긴 건수
+	Dropped   int    // 다시 시도해도 같을 실패라 큐에서 뺀 건수
+	Aborted   bool   // 연속 실패로 중단했는지
+	LastError string // 마지막 실패 사유. 없으면 빈 문자열
 }
 
 // maxConsecutiveFailures는 이만큼 연달아 실패하면 나머지를 포기한다.
@@ -175,6 +176,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 	processed, missing, dropped := 0, 0, 0
 	consecutive := 0
 	aborted := false
+	lastErr := ""
 	var failed []store.QueueItem
 	for i, q := range pending {
 		if aborted {
@@ -199,6 +201,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		}
 		fb, err := review(ctx, c, p, a, now())
 		if err != nil {
+			lastErr = err.Error()
 			if permanent(err) {
 				// 다시 보내도 같은 곳에서 같은 금액을 잃는다. 큐에서 뺀다.
 				dropped++
@@ -227,6 +230,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		Missing:   missing,
 		Dropped:   dropped,
 		Aborted:   aborted,
+		LastError: lastErr,
 	}
 	if err := rewriteQueue(queuePath, failed); err != nil {
 		return res, err

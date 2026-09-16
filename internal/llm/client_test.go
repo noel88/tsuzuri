@@ -154,3 +154,18 @@ func TestWatchStallCancelsWhenStreamGoesQuiet(t *testing.T) {
 		t.Fatal("멈춘 연결을 끊지 않았다")
 	}
 }
+
+// Haiku는 thinking {type: adaptive}를 받지 않는다. 그대로 보내면 400으로
+// 거절당해 온라인 기능이 통째로 막힌다.
+func TestAdaptiveThinkingSkippedForHaiku(t *testing.T) {
+	for _, m := range []string{"claude-haiku-4-5", "Claude-Haiku-4-5", "claude-haiku-4-5-20251001"} {
+		if supportsAdaptiveThinking(m) {
+			t.Errorf("%q에는 적응형 사고를 보내면 안 된다", m)
+		}
+	}
+	for _, m := range []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1"} {
+		if !supportsAdaptiveThinking(m) {
+			t.Errorf("%q에는 적응형 사고를 보내야 한다", m)
+		}
+	}
+}

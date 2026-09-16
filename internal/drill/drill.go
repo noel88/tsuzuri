@@ -33,6 +33,7 @@ type Session struct {
 	In       *bufio.Reader
 	Out      io.Writer
 	TermW    int
+	Online   bool // 마지막 온라인 작업이 성공했는지. 화면 상태 표시에 쓴다.
 	Now      func() time.Time
 }
 
@@ -56,7 +57,7 @@ func (s *Session) Run() (Outcome, error) {
 
 	for i := 0; i < len(s.Problems); {
 		p := s.Problems[i]
-		st := ui.Status{Index: i + 1, Total: len(s.Problems), QueueLen: queueLen}
+		st := ui.Status{Index: i + 1, Total: len(s.Problems), QueueLen: queueLen, Online: s.Online}
 
 		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW))
 
