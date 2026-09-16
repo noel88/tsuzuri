@@ -148,3 +148,31 @@ func TestSaveDoesNotDestroyExistingOnEncodeFailure(t *testing.T) {
 		t.Fatalf("원본이 온전해야 한다:\n%s", before)
 	}
 }
+
+// 포메라의 데이터는 vfat SD카드에 놓인다. vfat은 유닉스 권한이 없어
+// chmod가 거부될 수 있는데, 그것을 오류로 다루면 그 기기에서는 설정을
+// 아예 저장하지 못한다.
+func TestSaveSucceedsWhenChmodIsNotSupported(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := Save(path, Config{APIKey: "sk-ant-test", Model: "claude-opus-5"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 디렉터리는 쓸 수 있지만 파일 소유자가 아니어서 chmod가 거부되는 상황을
+	// 흉내내기는 어렵다. 대신 Save가 chmod 결과에 의존하지 않는지 본다:
+	// 읽기 전용 권한으로 만들어 둔 파일도 덮어써져야 한다.
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, Config{APIKey: "sk-ant-second", Model: "claude-opus-5"}); err != nil {
+		t.Fatalf("권한 때문에 저장이 막히면 안 된다: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.APIKey != "sk-ant-second" {
+		t.Errorf("APIKey = %q", got.APIKey)
+	}
+}
