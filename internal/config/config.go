@@ -57,9 +57,15 @@ func Load(path string) (Config, error) {
 // 임시 파일에 쓰고 rename으로 바꾼다. 제자리에서 truncate하면 그 사이에
 // 전원이 끊길 때 API 키를 잃는데, 포메라는 예고 없이 꺼지는 기계다.
 //
-// 권한은 명시적으로 0600으로 맞춘다. OpenFile의 mode는 파일을 **만들 때만**
-// 적용되므로, vim으로 먼저 만들어 둔 0644 파일은 그냥 두면 세계 읽기 가능인
-// 채로 API 키를 담게 된다.
+// 권한은 0600으로 맞춰 본다. OpenFile의 mode는 파일을 **만들 때만** 적용되어
+// vim으로 먼저 만들어 둔 0644 파일은 그냥 두면 세계 읽기 가능인 채로 API 키를
+// 담게 되기 때문이다.
+//
+// 다만 권한 설정 실패를 치명적으로 다루지 않는다. 포메라의 데이터는 vfat
+// SD카드에 놓이는데, vfat은 유닉스 권한 자체가 없어 chmod가 거부될 수 있다.
+// 그것을 오류로 처리하면 그 기기에서는 설정을 아예 저장하지 못한다.
+// vfat에서는 어차피 권한을 좁힐 수 없으므로, 키를 숨기려면 파일 대신
+// ANTHROPIC_API_KEY 환경변수를 쓰는 것이 올바른 방법이다.
 func Save(path string, c Config) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
@@ -80,10 +86,9 @@ func Save(path string, c Config) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		os.Remove(tmp)
-		return err
-	}
+	// 실패해도 계속 진행한다 (vfat 등 권한을 지원하지 않는 파일 시스템).
+	_ = os.Chmod(tmp, 0o600)
+
 	return os.Rename(tmp, path)
 }
 
