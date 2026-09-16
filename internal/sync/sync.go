@@ -117,7 +117,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		already[f.AttemptID] = true
 	}
 
-	problems, err := pack.ByID(filepath.Join(dataDir, "packs"))
+	problems, _, err := pack.ByID(filepath.Join(dataDir, "packs"))
 	if err != nil {
 		return Result{}, err
 	}

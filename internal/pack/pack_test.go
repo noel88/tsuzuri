@@ -56,7 +56,7 @@ func TestLoadReportsLineNumberOnBadJSON(t *testing.T) {
 }
 
 func TestLoadDirFiltersByDirection(t *testing.T) {
-	got, err := LoadDir("../../testdata/packs", KoToJa)
+	got, _, err := LoadDir("../../testdata/packs", KoToJa)
 	if err != nil {
 		t.Fatalf("LoadDir: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestByIDDetectsCollisionAcrossPacks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err := ByID(dir)
+	_, _, err := ByID(dir)
 	if err == nil {
 		t.Fatal("겹치는 id는 오류로 보고해야 한다")
 	}
@@ -90,7 +90,7 @@ func TestByIDDetectsCollisionAcrossPacks(t *testing.T) {
 }
 
 func TestByIDLoadsAcrossDirections(t *testing.T) {
-	got, err := ByID("../../testdata/packs")
+	got, _, err := ByID("../../testdata/packs")
 	if err != nil {
 		t.Fatalf("ByID: %v", err)
 	}
@@ -99,5 +99,102 @@ func TestByIDLoadsAcrossDirections(t *testing.T) {
 	}
 	if _, ok := got["p001"]; !ok {
 		t.Errorf("p001을 찾지 못했다: %v", got)
+	}
+}
+
+// 맥에서 SD카드에 팩을 복사하면 macOS가 AppleDouble 파일을 같이 만든다.
+// 그 파일을 팩으로 읽으려다 실패하면 앱이 시작조차 못 했다.
+func TestLoadDirSkipsAppleDoubleSidecars(t *testing.T) {
+	dir := t.TempDir()
+	good := `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "pack.jsonl"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// AppleDouble은 바이너리라 첫 바이트부터 JSON이 아니다.
+	if err := os.WriteFile(filepath.Join(dir, "._pack.jsonl"), []byte{0, 5, 22, 7, 0, 2}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte{0, 1}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, skipped, err := LoadDir(dir, KoToJa)
+	if err != nil {
+		t.Fatalf("사이드카 파일 때문에 실패하면 안 된다: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("정상 팩은 읽혀야 한다: %+v", got)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("사이드카는 조용히 건너뛴다(경고 대상 아님): %+v", skipped)
+	}
+}
+
+func TestLoadDirKeepsGoingWhenOnePackIsBroken(t *testing.T) {
+	// 팩 하나가 전원 차단으로 잘렸거나 손으로 고치다 깨져도, 나머지로 계속
+	// 쓸 수 있어야 한다. 대신 무엇을 건너뛰었는지는 알려야 한다.
+	dir := t.TempDir()
+	good := `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "a-good.jsonl"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b-broken.jsonl"), []byte("{이건 JSON이 아니다\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, skipped, err := LoadDir(dir, KoToJa)
+	if err != nil {
+		t.Fatalf("깨진 팩 하나로 앱이 못 켜지면 안 된다: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "p001" {
+		t.Errorf("정상 팩은 읽혀야 한다: %+v", got)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Path, "b-broken") {
+		t.Fatalf("건너뛴 팩을 알려야 한다: %+v", skipped)
+	}
+	if skipped[0].Reason == "" {
+		t.Error("왜 건너뛰었는지 알려야 한다")
+	}
+}
+
+func TestByIDSkipsSidecarsAndBrokenPacks(t *testing.T) {
+	dir := t.TempDir()
+	good := `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "good.jsonl"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "._good.jsonl"), []byte{0, 5}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.jsonl"), []byte("깨짐\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, skipped, err := ByID(dir)
+	if err != nil {
+		t.Fatalf("ByID: %v", err)
+	}
+	if _, ok := got["p001"]; !ok {
+		t.Errorf("정상 문제를 찾지 못했다: %v", got)
+	}
+	if len(skipped) != 1 {
+		t.Errorf("깨진 팩 하나만 보고해야 한다: %+v", skipped)
+	}
+}
+
+func TestLoadStripsUTF8BOM(t *testing.T) {
+	// 손으로 만든 팩에 BOM이 붙으면 첫 줄이 통째로 깨졌다.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bom.jsonl")
+	line := "\ufeff" + `{"id":"p001","dir":"ko2ja","prompt":"질문","reference":"답","style":"plain"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("BOM 때문에 실패하면 안 된다: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "p001" {
+		t.Errorf("Load = %+v", got)
 	}
 }
