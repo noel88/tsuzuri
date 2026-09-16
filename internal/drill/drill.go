@@ -95,6 +95,18 @@ func (s *Session) Run() (Outcome, error) {
 		if err := store.Append(attemptsPath, attempt); err != nil {
 			return OutcomeDone, err
 		}
+
+		// 답안을 저장한 직후에 큐에 넣는다.
+		//
+		// 결과 화면의 입력을 기다렸다가 넣으면, 그 화면에서 덮개를 닫거나
+		// Ctrl+C를 누른 답안이 저장은 됐는데 첨삭 대기열에는 없는 상태가
+		// 된다. 그런 답안은 영영 첨삭받지 못한다.
+		if err := store.Append(queuePath, store.QueueItem{
+			AttemptID: attempt.ID,
+			At:        at,
+		}); err != nil {
+			return OutcomeDone, err
+		}
 		queueLen++
 		st.QueueLen = queueLen
 
@@ -106,13 +118,16 @@ func (s *Session) Run() (Outcome, error) {
 		}
 		cmd := ui.ParseCommand(cmdLine)
 
-		// 모든 답안을 큐에 적재한다. F는 우선 처리 표시일 뿐이다.
-		if err := store.Append(queuePath, store.QueueItem{
-			AttemptID: attempt.ID,
-			Priority:  cmd == ui.CmdPriority,
-			At:        at,
-		}); err != nil {
-			return OutcomeDone, err
+		// F는 우선 처리 표시다. 큐는 append-only이므로 같은 답안에 대해
+		// 우선 표시를 한 줄 더 남긴다. sync가 답안 단위로 합친다.
+		if cmd == ui.CmdPriority {
+			if err := store.Append(queuePath, store.QueueItem{
+				AttemptID: attempt.ID,
+				Priority:  true,
+				At:        at,
+			}); err != nil {
+				return OutcomeDone, err
+			}
 		}
 
 		switch cmd {

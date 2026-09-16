@@ -343,8 +343,10 @@ func (a *app) setup() error {
 	// 고치는 것을 전제하므로 오타가 예상되는 실패이고, 여기서 막으면
 	// 그것을 고칠 유일한 화면에 들어갈 수 없게 된다.
 	c, err := config.Load(a.configPath)
-	if err != nil {
-		a.notice("설정 파일을 읽지 못해 기본값으로 엽니다. 저장하면 덮어씁니다.\n  " + err.Error())
+	broken := err != nil
+	if broken {
+		a.notice("설정 파일을 읽지 못했습니다. 기본값을 보여 주지만, 값을 바꿀 때까지\n" +
+			"  파일은 그대로 둡니다. 직접 고치려면 config.toml을 여세요.\n  " + err.Error())
 		c = config.Default()
 	}
 	fmt.Fprint(a.out, ui.RenderSetup(c, ui.Status{}, a.termW))
@@ -359,16 +361,32 @@ func (a *app) setup() error {
 	}
 	field := ui.SetupFields[n-1]
 
-	fmt.Fprintf(a.out, "\n  %s (그대로 두려면 Enter) >> ", field.Label)
+	fmt.Fprintf(a.out, "\n  %s (그대로 두려면 Enter, 취소는 :q) >> ", field.Label)
 	value, _, err := ui.ReadLine(a.in)
 	if err != nil {
 		return err
 	}
-	c, err = ui.ParseSetupAnswer(field.Key, value, c)
+	if ui.IsCancel(value) {
+		a.notice("취소했습니다. 설정은 그대로입니다.")
+		return nil
+	}
+
+	updated, err := ui.ParseSetupAnswer(field.Key, value, c)
 	if err != nil {
 		return err
 	}
-	if err := config.Save(a.configPath, c); err != nil {
+	// 바뀐 것이 없으면 파일을 건드리지 않는다.
+	//
+	// Enter만 눌러도 저장하면, 읽지 못한 설정 파일이 기본값으로 덮어써져
+	// API 키가 사라진다. 사용자는 "그대로 두려면 Enter"를 믿고 눌렀을 뿐이다.
+	if updated == c {
+		a.notice("바뀐 것이 없어 저장하지 않았습니다.")
+		return nil
+	}
+	if broken {
+		a.notice("읽지 못한 설정 파일을 덮어씁니다.")
+	}
+	if err := config.Save(a.configPath, updated); err != nil {
 		return err
 	}
 	a.notice("저장했습니다.")
@@ -386,26 +404,56 @@ func (a *app) fetchPack() error {
 		return err
 	}
 
+	// 각 프롬프트에서 빠져나갈 수 있어야 한다. 취소할 방법이 없으면
+	// 메뉴로 돌아가려고 친 m이나 x가 레벨·주제로 들어가고, 그대로 과금되는
+	// 생성이 시작된다.
+	const cancelHint = " (취소는 :q)"
+
 	dir := pack.KoToJa
-	fmt.Fprint(a.out, "\n  방향 [1] 한국어→일본어  [2] 일본어→한국어 >> ")
-	if line, _, err := ui.ReadLine(a.in); err == nil && strings.TrimSpace(line) == "2" {
+	fmt.Fprint(a.out, "\n  방향 [1] 한국어→일본어  [2] 일본어→한국어"+cancelHint+" >> ")
+	line, eof, err := ui.ReadLine(a.in)
+	if err != nil {
+		return err
+	}
+	if ui.IsCancel(line) || eof {
+		return a.cancelFetch()
+	}
+	if strings.TrimSpace(line) == "2" {
 		dir = pack.JaToKo
 	}
 
-	fmt.Fprintf(a.out, "  레벨 (기본 %s) >> ", c.Level)
-	level, _, _ := ui.ReadLine(a.in)
+	fmt.Fprintf(a.out, "  레벨 (기본 %s)%s >> ", c.Level, cancelHint)
+	level, eof, err := ui.ReadLine(a.in)
+	if err != nil {
+		return err
+	}
+	if ui.IsCancel(level) || eof {
+		return a.cancelFetch()
+	}
 	if strings.TrimSpace(level) == "" {
 		level = c.Level
 	}
 
-	fmt.Fprintf(a.out, "  주제 (기본 %s) >> ", orNone(c.Topic))
-	topic, _, _ := ui.ReadLine(a.in)
+	fmt.Fprintf(a.out, "  주제 (기본 %s)%s >> ", orNone(c.Topic), cancelHint)
+	topic, eof, err := ui.ReadLine(a.in)
+	if err != nil {
+		return err
+	}
+	if ui.IsCancel(topic) || eof {
+		return a.cancelFetch()
+	}
 	if strings.TrimSpace(topic) == "" {
 		topic = c.Topic
 	}
 
-	fmt.Fprintf(a.out, "  문항 수 (기본 %d) >> ", c.PackSize)
-	sizeLine, _, _ := ui.ReadLine(a.in)
+	fmt.Fprintf(a.out, "  문항 수 (기본 %d)%s >> ", c.PackSize, cancelHint)
+	sizeLine, eof, err := ui.ReadLine(a.in)
+	if err != nil {
+		return err
+	}
+	if ui.IsCancel(sizeLine) || eof {
+		return a.cancelFetch()
+	}
 	count := c.PackSize
 	if n, err := strconv.Atoi(strings.TrimSpace(sizeLine)); err == nil && n > 0 {
 		count = n
@@ -423,6 +471,12 @@ func (a *app) fetchPack() error {
 		return err
 	}
 	a.notice(fmt.Sprintf("%d문항을 받았습니다: %s", len(ps), filepath.Base(path)))
+	return nil
+}
+
+// cancelFetch는 팩 받기를 취소한다. 과금되는 호출은 일어나지 않는다.
+func (a *app) cancelFetch() error {
+	a.notice("취소했습니다. 받아온 팩은 없습니다.")
 	return nil
 }
 
@@ -449,7 +503,15 @@ func (a *app) fetchFeedback() error {
 		a.notice("처리할 항목이 없습니다.")
 	}
 	if res.Failed > 0 {
-		a.notice(fmt.Sprintf("%d건은 실패해 큐에 남겼습니다. 다시 시도하면 됩니다.", res.Failed))
+		msg := fmt.Sprintf("%d건은 실패해 큐에 남겼습니다. 다시 시도하면 됩니다.", res.Failed)
+		if res.Aborted {
+			msg += "\n  연달아 실패해서 나머지는 보내지 않았습니다. 네트워크를 확인하세요."
+		}
+		a.notice(msg)
+	}
+	if res.Dropped > 0 {
+		a.notice(fmt.Sprintf("%d건은 다시 보내도 같은 이유로 실패해서 큐에서 뺐습니다. "+
+			"답안은 남아 있습니다.", res.Dropped))
 	}
 	if res.Missing > 0 {
 		a.notice(fmt.Sprintf("%d건은 문제를 찾지 못했습니다. packs/ 에서 팩이 지워졌는지 확인하세요. "+

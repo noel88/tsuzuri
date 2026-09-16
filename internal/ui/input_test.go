@@ -111,3 +111,17 @@ func TestReadFromEditorSeedsInitialContent(t *testing.T) {
 		t.Errorf("초기 내용이 보존되어야 한다: %q", got)
 	}
 }
+
+func TestIsCancel(t *testing.T) {
+	for _, s := range []string{":q", ":quit", " :Q ", ":cancel"} {
+		if !IsCancel(s) {
+			t.Errorf("%q는 취소여야 한다", s)
+		}
+	}
+	// 값을 묻는 자리에서는 m·x·q도 값일 수 있다(주제가 "x"일 수 있다).
+	for _, s := range []string{"m", "x", "q", "", "N3", "일상"} {
+		if IsCancel(s) {
+			t.Errorf("%q를 취소로 보면 안 된다", s)
+		}
+	}
+}
