@@ -107,3 +107,35 @@ func TestSuspectFormsDoesNotFlagNormalKuAdverb(t *testing.T) {
 		t.Errorf("정상 활용을 짚으면 안 된다: %+v", got)
 	}
 }
+
+// 한국어 보조용언은 붙여 써도 맞다(한글 맞춤법 제47항). 띄어쓰기까지
+// 따지면 맞는 답에 "빠짐"이 뜬다.
+func TestCoverageIgnoresSpacingVariants(t *testing.T) {
+	tk := koTok(t)
+	tokens := tk.Tokenize("오래 앉아있었다.")
+	covered, missing := Coverage(tokens, []string{"앉아 있"})
+	if len(covered) != 1 || len(missing) != 0 {
+		t.Errorf("붙여 쓴 보조용언도 맞아야 한다: covered=%v missing=%v", covered, missing)
+	}
+}
+
+// 생성된 핵심 표현은 사전형(「가져오다」)으로 적히는데, 형태소 분석은
+// 어간(「가져오」)만 돌려준다.
+func TestCoverageMatchesDictionaryFormKeyPoints(t *testing.T) {
+	tk := koTok(t)
+	tokens := tk.Tokenize("우산을 가져왔습니다.")
+	covered, missing := Coverage(tokens, []string{"가져오다"})
+	if len(covered) != 1 || len(missing) != 0 {
+		t.Errorf("사전형 핵심 표현도 맞아야 한다: covered=%v missing=%v (기본형 %v)",
+			covered, missing, bases(tokens))
+	}
+}
+
+func TestCoverageStillReportsGenuinelyMissing(t *testing.T) {
+	tk := koTok(t)
+	tokens := tk.Tokenize("어제 카페에 갔다.")
+	_, missing := Coverage(tokens, []string{"생각보다"})
+	if len(missing) != 1 {
+		t.Errorf("정말 없는 표현은 빠짐으로 나와야 한다: %v", missing)
+	}
+}

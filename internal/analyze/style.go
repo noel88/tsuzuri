@@ -10,21 +10,7 @@ import (
 // 판단 근거가 없으면 빈 문자열을 돌려준다 —
 // 모른다고 말하는 편이 틀리게 단정하는 것보다 낫다.
 func DetectStyle(tokens []Token) pack.Style {
-	// 일본어: 정중체·보통체 표지를 문장 어디서든 찾는다.
-	for _, t := range tokens {
-		switch t.Base {
-		case "です", "ます":
-			return pack.StylePolite
-		case "だ", "である":
-			return pack.StylePlain
-		}
-	}
-
-	// 한국어: 마지막 어미로 판단한다.
-	//
-	// EF(종결어미)만 보면 안 된다. ko-dic은 「있었다.」의 「다」를
-	// EC(연결어미)로 태깅한다 — 문장 끝인데도 그렇다.
-	// 그래서 기호를 제외한 마지막 어미 토큰을 본다.
+	// 한국어 어미가 보이면 한국어로 판단한다.
 	if last, ok := lastEnding(tokens); ok {
 		if isKoreanPolite(last.Surface) {
 			return pack.StylePolite
@@ -32,31 +18,61 @@ func DetectStyle(tokens []Token) pack.Style {
 		return pack.StylePlain
 	}
 
-	// 일본어 보통체는 표지 없이 「〜た」「〜る」로 끝나는 일이 많다.
-	// 정중체 표지가 하나도 없고 용언으로 끝나면 보통체로 본다.
-	if last, ok := lastMeaningful(tokens); ok {
-		switch last.POS {
-		case "助動詞", "動詞", "形容詞":
-			return pack.StylePlain
+	// 일본어: 정중체 표지를 문장 어디서든 먼저 찾는다.
+	//
+	// 보통체 표지를 같이 훑으면 안 된다. IPADIC은 연체형 「な」와 중지형
+	// 「で」에도 기본형 「だ」를 주기 때문에, 「静かなカフェで…읽었습니다」처럼
+	// 정중체 문장도 첫 「な」에서 보통체로 단정하게 된다.
+	for _, t := range tokens {
+		if t.Base == "です" || t.Base == "ます" {
+			return pack.StylePolite
 		}
+	}
+
+	// 보통체 표지는 문장을 끝맺는 자리에서만 인정한다.
+	last, ok := lastMeaningful(tokens)
+	if !ok {
+		return ""
+	}
+	if last.Base == "だ" || last.Base == "である" {
+		return pack.StylePlain
+	}
+	// 일본어 보통체는 표지 없이 「〜た」「〜る」로 끝나는 일이 많다.
+	switch last.POS {
+	case "助動詞", "動詞", "形容詞":
+		return pack.StylePlain
 	}
 	return ""
 }
 
-// lastEnding은 기호를 제외한 마지막 한국어 어미(E로 시작하는 태그) 토큰이다.
+// lastEnding은 기호를 제외한 마지막 한국어 어미 토큰이다.
+//
+// 어미 태그만 보면 안 된다. ko-dic은 「있었다.」의 「다」를 문장 끝인데도
+// EC(연결어미)로 태깅하고, 「입니다」「간다」처럼 어간과 어미가 붙은 토큰에는
+// VCP+EF, VV+EC 같은 복합 태그를 준다. 복합 태그의 성분을 봐야 한다.
 func lastEnding(tokens []Token) (Token, bool) {
 	for i := len(tokens) - 1; i >= 0; i-- {
 		t := tokens[i]
 		if t.IsSymbol() {
 			continue
 		}
-		if strings.HasPrefix(t.POS, "E") {
+		if hasEndingTag(t.POS) {
 			return t, true
 		}
-		// 어미가 아닌 실질 형태소를 만나면 더 볼 필요가 없다.
+		// 어미를 달고 있지 않은 실질 형태소를 만나면 더 볼 필요가 없다.
 		return Token{}, false
 	}
 	return Token{}, false
+}
+
+// hasEndingTag는 복합 태그에 어미 성분(E로 시작)이 있는지 본다.
+func hasEndingTag(pos string) bool {
+	for _, part := range strings.Split(pos, "+") {
+		if strings.HasPrefix(part, "E") {
+			return true
+		}
+	}
+	return false
 }
 
 // lastMeaningful은 기호를 제외한 마지막 토큰이다.
@@ -69,8 +85,17 @@ func lastMeaningful(tokens []Token) (Token, bool) {
 	return Token{}, false
 }
 
+// koreanPoliteEndings는 정중체로 끝맺는 어미들이다.
+//
+// 「니다」와 「니까」는 「입니다」「갔습니까」처럼 어간과 붙은 토큰까지
+// 잡기 위한 것이다. 「하니까」 같은 연결어미와 겹치지 않도록, 어미를 달고
+// 있는 마지막 토큰에만 적용한다.
+var koreanPoliteEndings = []string{
+	"요", "니다", "니까", "ㅂ니다", "ᄇ니다", "십시오", "세요", "ㅂ시다",
+}
+
 func isKoreanPolite(surface string) bool {
-	for _, suf := range []string{"요", "습니다", "ㅂ니다", "십시오", "세요", "ᄇ니다"} {
+	for _, suf := range koreanPoliteEndings {
 		if strings.HasSuffix(surface, suf) {
 			return true
 		}
