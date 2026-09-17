@@ -42,12 +42,11 @@ func TestParseMenuKey(t *testing.T) {
 	if k, ok := ParseMenuKey("41"); !ok || k != "41" {
 		t.Errorf("ParseMenuKey(41) = %q,%v", k, ok)
 	}
-	// 「1 드릴 시작」은 첫 팩(=41)을 뜻한다.
-	// 이 규약 때문에 main.go는 팩 키를 방향 인덱스가 아니라
-	// 세트 인덱스로 매겨야 한다. 방향 인덱스로 매기면 ko2ja 팩이
-	// 없을 때 첫 세트가 42가 되어 이 메뉴 항목이 죽는다.
-	if k, ok := ParseMenuKey("1"); !ok || k != "41" {
-		t.Errorf("「1 드릴 시작」은 첫 팩이어야 한다: %q,%v", k, ok)
+	// 번호를 다른 번호로 바꾸지 않는다. 「1」이 무엇을 뜻하는지는 그것을
+	// 처리하는 쪽이 안다 — 여기서 바꾸면 화살표로 고른 길이 그 변환을
+	// 거치지 않아 같은 항목이 다르게 동작한다.
+	if k, ok := ParseMenuKey("1"); !ok || k != "1" {
+		t.Errorf("ParseMenuKey(1) = %q,%v", k, ok)
 	}
 	if _, ok := ParseMenuKey("x"); ok {
 		t.Error("x는 종료여야 한다")
