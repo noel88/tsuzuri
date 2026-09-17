@@ -24,13 +24,20 @@ type Cursor struct {
 // menuEntry는 왼쪽 칸의 항목 하나다.
 type menuEntry struct{ key, label string }
 
-func leftEntries(st Status) []menuEntry {
+func leftEntries(st Status, choices []Choice) []menuEntry {
 	review := "복습 드릴"
 	if st.Due > 0 {
 		review = fmt.Sprintf("복습 드릴 (%d)", st.Due)
 	}
+	// 「드릴 시작」은 자료실 맨 위 팩을 연다. 어느 팩인지 적어 두지 않으면
+	// 누르기 전에는 알 수 없다 — 자료실이 팩마다 한 줄이 된 뒤로 그 줄이
+	// 여럿이고, 무엇이 맨 위인지는 정렬 규칙을 알아야 짐작이 된다.
+	start := "드릴 시작"
+	if len(choices) > 0 {
+		start = fmt.Sprintf("드릴 시작 (%s)", choices[0].Key)
+	}
 	return []menuEntry{
-		{"1", "드릴 시작"},
+		{"1", start},
 		{"2", "이어하기"},
 		{"3", review},
 		{"4", "첨삭 보기"},
@@ -50,7 +57,7 @@ func MenuKeyAt(choices []Choice, st Status, c Cursor) (string, bool) {
 		}
 		return choices[c.Index].Key, true
 	}
-	left := leftEntries(st)
+	left := leftEntries(st, choices)
 	if c.Index < 0 || c.Index >= len(left) {
 		return "", false
 	}
@@ -62,7 +69,7 @@ func MenuKeyAt(choices []Choice, st Status, c Cursor) (string, bool) {
 // 끝에서 더 눌러도 넘어가지 않고 멈춘다. 아홉 줄짜리 목록에서 위로 계속
 // 눌렀을 때 맨 아래로 돌아가면 지금 어디에 있는지 놓치게 된다.
 func MoveCursor(c Cursor, k Key, choices []Choice, st Status) Cursor {
-	n := len(leftEntries(st))
+	n := len(leftEntries(st, choices))
 	if c.Right {
 		n = len(choices)
 	}
@@ -85,7 +92,7 @@ func MoveCursor(c Cursor, k Key, choices []Choice, st Status) Cursor {
 	case KeyLeft:
 		if c.Right {
 			c.Right = false
-			c.Index = clamp(c.Index, len(leftEntries(st)))
+			c.Index = clamp(c.Index, len(leftEntries(st, choices)))
 		}
 	}
 	return c
@@ -107,7 +114,7 @@ func ClampCursor(c Cursor, choices []Choice, st Status) Cursor {
 	if c.Right && len(choices) == 0 {
 		c.Right = false
 	}
-	n := len(leftEntries(st))
+	n := len(leftEntries(st, choices))
 	if c.Right {
 		n = len(choices)
 	}
@@ -141,7 +148,7 @@ func RenderMenu(choices []Choice, st Status, termW int, cur Cursor) string {
 	}
 
 	var left []string
-	for i, e := range leftEntries(st) {
+	for i, e := range leftEntries(st, choices) {
 		item := MenuItem(e.key, e.label, 22)
 		item[0] = point(item[0], !cur.Right && cur.Index == i)
 		left = append(left, item...)
