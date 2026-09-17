@@ -8,8 +8,9 @@
 | 파일 | 필요성 | 설명 |
 |---|---|---|
 | `tsuzuri` | **필수** | armv7 정적 바이너리 (46MB) |
-| `packs/*.jsonl` | 선택 | 문제 팩. 없으면 앱 안에서 `5. 팩 받기`로 받는다 |
-| `config.toml` | 선택 | 없으면 기본값. API 키는 앱 안 `4. 설정`에서도 넣을 수 있다 |
+| `run.sh` | 권장 | 키를 환경변수로 넘겨 실행한다 |
+| `packs/*.jsonl` | 권장 | 시작 팩 10문항(양방향 5개씩)이 들어 있다 |
+| `config.toml` | 선택 | 없으면 기본값. 키는 `run.sh` 쪽을 권한다 |
 | `m0-check.sh` | 검증용 | 실기 확인 스크립트 |
 
 나머지(`attempts.jsonl`, `queue.jsonl`, `feedback.jsonl`, `review/`)는
@@ -49,12 +50,28 @@ scp deploy/tsuzuri deploy/m0-check.sh <포메라>:~/tsuzuri/
 scp testdata/packs/*.jsonl <포메라>:~/tsuzuri/packs/
 ```
 
+## API 키 넣기
+
+키는 SD카드가 아니라 **기기 홈**에 둔다. SD카드는 vfat이라 권한을 좁힐 수
+없고, 카드를 잃으면 키가 그대로 노출된다. 기기에서 한 번만 하면 된다.
+
+```sh
+mkdir -p ~/.config/tsuzuri
+cat > ~/.config/tsuzuri/key      # 키를 붙여넣고 Ctrl+D
+chmod 600 ~/.config/tsuzuri/key
+```
+
+`run.sh`가 이 파일을 읽어 `ANTHROPIC_API_KEY`로 넘긴다. 키가 없으면 안내만
+띄우고 오프라인 기능은 그대로 쓸 수 있다.
+
+이 앱 전용 키를 발급하고 사용량 제한을 걸어 두는 것을 권한다.
+
 ## 실행
 
 ```bash
 cd <tsuzuri 디렉터리>
-chmod +x tsuzuri m0-check.sh
-./tsuzuri
+chmod +x tsuzuri run.sh m0-check.sh
+sh run.sh
 ```
 
 터미널 폭은 자동으로 감지한다(TIOCGWINSZ). 감지가 안 되는 환경이라면
