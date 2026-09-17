@@ -39,7 +39,7 @@ func noisyAnalysis() analyze.Analysis {
 }
 
 func TestRenderProblemHidesReference(t *testing.T) {
-	out := RenderProblem(sampleProblem(), sampleStatus(), 92)
+	out := RenderProblem(sampleProblem(), sampleStatus(), 92, -1)
 
 	if !strings.Contains(out, "어제 처음 간 카페") {
 		t.Error("제시문이 보여야 한다")

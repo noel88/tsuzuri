@@ -19,6 +19,8 @@ const (
 	CmdMark                    // B — 복습 목록에 넣기
 	CmdMenu                    // M — 메뉴로
 	CmdQuit                    // X — 종료
+	CmdEdit                    // :e — 에디터로 긴 답 쓰기
+	CmdStay                    // 하던 일로 돌아가기
 )
 
 // ReadLine은 한 줄을 읽는다.
