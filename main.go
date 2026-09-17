@@ -224,12 +224,63 @@ func (a *app) analyzerFor(d pack.Direction) (*analyze.Analyzer, error) {
 		}
 		return nil, a.restartFor(d)
 	}
-	a.notice(fmt.Sprintf("사전을 읽는 중입니다 (%s)...", d))
-	az, err := analyze.New(d)
+	az, err := a.loadDictionary(d)
 	if err != nil {
 		return nil, err
 	}
 	a.analyzer, a.analyzerDir = az, d
+	return az, nil
+}
+
+// dictLoadEstimate는 포메라 DM250(Cortex-A7 816MHz)에서 잰 사전 로딩 시간이다.
+//
+// 맥에서는 1초도 걸리지 않지만 실기에서는 수십 초가 걸린다. 그 사이 화면이
+// 멈춘 것처럼 보이면 고장으로 오해하므로, 얼마나 걸릴지 미리 알리고 진행을
+// 보여준다. 기다리는 시간 자체는 줄일 수 없다 — kagome가 사전 구조를 만드는
+// 비용이고, CPU는 816MHz가 상한이다.
+var dictLoadEstimate = map[pack.Direction]time.Duration{
+	pack.KoToJa: 17 * time.Second, // 일본어 사전(IPADIC)
+	pack.JaToKo: 39 * time.Second, // 한국어 사전(mecab-ko-dic)
+}
+
+// loadDictionary는 사전을 읽으면서 진행을 보여준다.
+func (a *app) loadDictionary(d pack.Direction) (*analyze.Analyzer, error) {
+	est := dictLoadEstimate[d]
+	if est > 0 {
+		fmt.Fprintf(a.out, "\n  사전을 읽는 중입니다 (%s, 약 %d초 걸립니다)\n  ",
+			d, int(est.Seconds()))
+	} else {
+		fmt.Fprintf(a.out, "\n  사전을 읽는 중입니다 (%s)\n  ", d)
+	}
+
+	// 진행 표시는 점 하나씩. 화면을 지우거나 커서를 옮기지 않는다 —
+	// fbterm의 ANSI 지원 범위를 믿지 않기로 했기 때문이다(스펙 §6.1).
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				fmt.Fprint(a.out, ".")
+			}
+		}
+	}()
+
+	start := time.Now()
+	az, err := analyze.New(d)
+	close(stop)
+	<-done // 점 찍기가 끝난 뒤에 이어 쓴다
+
+	if err != nil {
+		fmt.Fprintln(a.out)
+		return nil, err
+	}
+	fmt.Fprintf(a.out, " 완료 (%.0f초)\n\n", time.Since(start).Seconds())
 	return az, nil
 }
 
