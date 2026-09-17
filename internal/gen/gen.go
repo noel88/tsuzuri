@@ -20,6 +20,10 @@ type Spec struct {
 	Level string
 	Topic string
 	Count int
+
+	// Round는 같은 조건으로 몇 번째 묶음인지다 (1부터).
+	// 여러 번 나눠 받을 때 앞선 묶음과 겹치지 않게 하려고 넘긴다.
+	Round int
 }
 
 const systemPrompt = `당신은 한국어 화자를 위한 일본어 작문 학습 교재를 만듭니다.
@@ -108,6 +112,16 @@ func lengthMix(count int) (short, mid, long int) {
 	return short, mid, long
 }
 
+// MaxCount는 한 번에 만들 수 있는 문항 수다.
+//
+// 응답 한도(64000 토큰)가 정한 값이다. 장문이 섞이면 한 문항이 1200자까지
+// 가므로 한 문항에 천 토큰 안팎이 든다. 넘겨서 부르면 몇 분을 기다린 끝에
+// 잘리거나 끊기고, 그동안 쓴 토큰은 그대로 청구된다 — 실기에서 300문항을
+// 요청했다가 그렇게 잃었다.
+//
+// 많이 필요하면 여러 번 받으면 된다. 팩은 파일마다 따로 쌓인다.
+const MaxCount = 25
+
 // Generate는 문제 팩을 만든다.
 // 두 번째 반환값은 버리거나 고친 문항의 사유다. 부르는 쪽이 사용자에게
 // 알린다 — 50문항을 요청하고 38문항을 받았는데 이유를 모르면, 같은 금액을
@@ -116,12 +130,24 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, []stri
 	if s.Count <= 0 {
 		return nil, nil, fmt.Errorf("문항 수가 0 이하입니다: %d", s.Count)
 	}
+	if s.Count > MaxCount {
+		return nil, nil, fmt.Errorf(
+			"한 번에 만들 수 있는 문항은 %d개까지입니다 (요청 %d개). 장문이 섞이면 한 문항이 길어서, "+
+				"더 넘기면 응답이 도중에 끊기고 그동안 쓴 토큰은 그대로 청구됩니다. 여러 번 나눠 받으세요",
+			MaxCount, s.Count)
+	}
 	short, mid, long := lengthMix(s.Count)
+	round := ""
+	if s.Round > 1 {
+		// 같은 조건으로 여러 번 받는다. 그대로 두면 비슷한 상황이 되풀이된다.
+		round = fmt.Sprintf("\n이번은 같은 조건으로 만드는 %d번째 묶음입니다. "+
+			"앞선 묶음에서 다뤘을 법한 상황은 피하고 다른 장면을 고르세요.", s.Round)
+	}
 	user := fmt.Sprintf(
 		"방향: %s (%s)\n레벨: %s\n주제: %s\n문항 수: %d\n"+
-			"길이 배분: 단문 %d개, 중문 %d개, 장문 %d개\n\n"+
+			"길이 배분: 단문 %d개, 중문 %d개, 장문 %d개%s\n\n"+
 			"위 조건으로 문장 쌍을 만들어 emit_problems 도구로 제출하세요.",
-		s.Dir, directionLabel(s.Dir), s.Level, s.Topic, s.Count, short, mid, long)
+		s.Dir, directionLabel(s.Dir), s.Level, s.Topic, s.Count, short, mid, long, round)
 
 	raw, err := c.Complete(ctx, llm.Request{
 		System:    systemPrompt,

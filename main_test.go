@@ -158,3 +158,13 @@ func TestArchiveShowsEverythingWhenAllDone(t *testing.T) {
 		t.Errorf("전부 끝냈더니 자료실이 비었다: %+v", got)
 	}
 }
+
+func TestBatchCountSplitsLargeRequests(t *testing.T) {
+	// 한 번에 다 만들 수는 없다. 장문이 섞이면 한 문항이 길어서 응답
+	// 한도를 넘기고, 넘기면 몇 분을 기다린 끝에 끊긴 채 토큰만 청구된다.
+	for n, want := range map[int]int{0: 0, 1: 1, 25: 1, 26: 2, 150: 6, 300: 12} {
+		if got := batchCount(n); got != want {
+			t.Errorf("batchCount(%d) = %d, 기대 %d", n, got, want)
+		}
+	}
+}

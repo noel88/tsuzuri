@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -128,7 +129,7 @@ func TestWatchStallKeepsWaitingWhileDataArrives(t *testing.T) {
 	defer stop()
 	called := make(chan struct{})
 	beat := make(chan struct{}, 1)
-	go watchStall(ctx, beat, func() { close(called) }, 60*time.Millisecond)
+	go watchStall(ctx, beat, func() { close(called) }, 60*time.Millisecond, new(atomic.Bool))
 
 	// 40ms마다 데이터가 오는 상황을 200ms 동안 이어간다.
 	for i := 0; i < 5; i++ {
@@ -146,7 +147,7 @@ func TestWatchStallCancelsWhenStreamGoesQuiet(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	called := make(chan struct{})
-	go watchStall(ctx, make(chan struct{}), func() { close(called) }, 50*time.Millisecond)
+	go watchStall(ctx, make(chan struct{}), func() { close(called) }, 50*time.Millisecond, new(atomic.Bool))
 
 	select {
 	case <-called:
@@ -167,5 +168,24 @@ func TestAdaptiveThinkingSkippedForHaiku(t *testing.T) {
 		if !supportsAdaptiveThinking(m) {
 			t.Errorf("%q에는 적응형 사고를 보내야 한다", m)
 		}
+	}
+}
+
+func TestWatchStallMarksThatItCut(t *testing.T) {
+	// 우리가 끊은 것이면 그렇게 말해야 한다. 표시가 없으면 사용자는
+	// 「context canceled」를 보고 무엇을 바꿔야 할지 알 수 없다.
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	var stalled atomic.Bool
+	done := make(chan struct{})
+	go watchStall(ctx, make(chan struct{}), func() { close(done) }, 30*time.Millisecond, &stalled)
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("멈춘 연결을 끊지 않았다")
+	}
+	if !stalled.Load() {
+		t.Error("끊었다는 표시를 남기지 않았다")
 	}
 }

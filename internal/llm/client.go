@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -64,7 +66,7 @@ func (f *FakeClient) Complete(_ context.Context, req Request) (string, error) {
 // 호출 전체에 시한을 걸면 안 된다. 50문항짜리 팩 생성은 정상적으로도
 // 몇 분씩 걸리는데, 그때 잘라 버리면 토큰 값은 이미 나간 뒤에 결과만
 // 잃는다. 그래서 "멈춰 있는 동안"만 잰다.
-const stallTimeout = 3 * time.Minute
+const stallTimeout = 6 * time.Minute
 
 // maxCallTimeout은 아무리 길어도 이보다 오래 붙잡고 있지 않는다.
 const maxCallTimeout = 30 * time.Minute
@@ -142,7 +144,8 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 	stalled, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	beat := make(chan struct{}, 1)
-	go watchStall(stalled, beat, cancel, stallTimeout)
+	var stalledOut atomic.Bool
+	go watchStall(stalled, beat, cancel, stallTimeout, &stalledOut)
 
 	stream := a.api.Messages.NewStreaming(ctx, params)
 	var msg anthropic.Message
@@ -156,14 +159,34 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 		}
 	}
 	if err := stream.Err(); err != nil {
+		// 우리가 끊은 것이면 그렇게 말한다.
+		//
+		// 그대로 올리면 사용자는 「context canceled」를 본다. 무슨 일이
+		// 일어났는지도, 무엇을 바꿔야 하는지도 알 수 없는 말이다.
+		if stalledOut.Load() {
+			return "", fmt.Errorf("%v 동안 응답이 오지 않아 끊었습니다. %s",
+				stallTimeout, orDefault(req.TruncHint, "요청을 줄여 보세요."))
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("%v가 지나도 끝나지 않아 끊었습니다. %s",
+				maxCallTimeout, orDefault(req.TruncHint, "요청을 줄여 보세요."))
+		}
 		return "", err
 	}
 
 	return extractJSON(msg, req.TruncHint)
 }
 
+func orDefault(s, alt string) string {
+	if s == "" {
+		return alt
+	}
+	return s
+}
+
 // watchStall은 beat가 timeout 동안 오지 않으면 호출을 끊는다.
-func watchStall(ctx context.Context, beat <-chan struct{}, cancel context.CancelFunc, timeout time.Duration) {
+// 끊었으면 stalled에 표시해 둔다 — 부르는 쪽이 사용자에게 설명해야 한다.
+func watchStall(ctx context.Context, beat <-chan struct{}, cancel context.CancelFunc, timeout time.Duration, stalled *atomic.Bool) {
 	t := time.NewTimer(timeout)
 	defer t.Stop()
 	for {
@@ -179,6 +202,7 @@ func watchStall(ctx context.Context, beat <-chan struct{}, cancel context.Cancel
 			}
 			t.Reset(timeout)
 		case <-t.C:
+			stalled.Store(true)
 			cancel()
 			return
 		}
