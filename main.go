@@ -984,6 +984,33 @@ func (a *app) fetchPack() error {
 	if n, err := strconv.Atoi(strings.TrimSpace(sizeLine)); err == nil && n > 0 {
 		count = n
 	}
+	// 이어 받을 팩이 있으면 묻는다.
+	//
+	// 8번을 두 번 눌러 20+20을 받으면 예전에는 파일이 둘이 됐다. 며칠에
+	// 걸쳐 한 팩을 키우고 싶은 쪽이 더 흔하다.
+	into := map[pack.Direction]packSet{}
+	if sets, err := a.loadPackSets(); err == nil {
+		for _, dir := range dirs {
+			cand, ok := extendable(sets, dir, level)
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(a.out, "\n  [%s] %s (%d문항, %d개 더 담을 수 있음)에 이어 받을까요?\n"+
+				"  이어 받기는 Enter, 새 팩은 n, 취소는 :q >> ",
+				cand.key, cand.label(), len(cand.problems), gen.MaxPack-len(cand.problems))
+			line, eof, err := ui.ReadLine(a.in)
+			if err != nil {
+				return err
+			}
+			if ui.IsCancel(line) || eof {
+				return a.cancelFetch()
+			}
+			if strings.ToLower(strings.TrimSpace(line)) != "n" {
+				into[dir] = cand
+			}
+		}
+	}
+
 	if per := share(count, len(dirs), 0); per > gen.MaxPack {
 		a.notice(fmt.Sprintf("팩 하나에는 %d문항까지 담습니다. %d개로 줄여서 받겠습니다.",
 			gen.MaxPack, gen.MaxPack*len(dirs)))
@@ -1031,6 +1058,18 @@ func (a *app) fetchPack() error {
 		// 실패해도 앞서 받은 것은 그 파일에 남는다.
 		var all []pack.Problem
 		path := ""
+		if cand, ok := into[dir]; ok {
+			// 이미 받아 둔 것을 함께 넘긴다. 묶음마다 파일을 통째로 다시
+			// 쓰므로, 앞서 있던 문항도 같이 있어야 사라지지 않는다.
+			all = append(all, cand.problems...)
+			path = cand.source
+			room := gen.MaxPack - len(all)
+			if want > room {
+				a.notice(fmt.Sprintf("%s 팩에는 %d개만 더 담을 수 있습니다. 그만큼만 받습니다.",
+					cand.key, room))
+				want = room
+			}
+		}
 
 		for want > 0 {
 			n := want
@@ -1078,6 +1117,25 @@ func (a *app) fetchPack() error {
 		a.notice(fmt.Sprintf("모두 %d문항을 받았습니다.", done))
 	}
 	return nil
+}
+
+// extendable은 이어 받을 만한 팩을 고른다.
+//
+// 방향과 레벨이 같고 아직 자리가 남은 것 중 가장 최근 것이다. 주제는 보지
+// 않는다 — 주제를 바꿔 가며 한 팩을 키우는 것이 오히려 흔하다.
+func extendable(sets []packSet, dir pack.Direction, level string) (packSet, bool) {
+	var best packSet
+	found := false
+	for _, s := range sets {
+		if s.dir != dir || len(s.problems) >= gen.MaxPack {
+			continue
+		}
+		if lv := s.levels(); len(lv) != 1 || lv[0] != level {
+			continue
+		}
+		best, found = s, true
+	}
+	return best, found
 }
 
 // batchCount는 n문항을 받으려면 몇 번 불러야 하는지다.

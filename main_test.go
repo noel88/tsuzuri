@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/noel88/tsuzuri/internal/gen"
 	"github.com/noel88/tsuzuri/internal/pack"
 	"github.com/noel88/tsuzuri/internal/store"
 )
@@ -166,5 +167,40 @@ func TestBatchCountSplitsLargeRequests(t *testing.T) {
 		if got := batchCount(n); got != want {
 			t.Errorf("batchCount(%d) = %d, 기대 %d", n, got, want)
 		}
+	}
+}
+
+func TestExtendablePicksMatchingPackWithRoom(t *testing.T) {
+	sets := []packSet{
+		{key: "41", dir: pack.KoToJa, source: "a", problems: []pack.Problem{{ID: "p1", Level: "N3"}}},
+		{key: "42", dir: pack.KoToJa, source: "b", problems: []pack.Problem{{ID: "p2", Level: "N2"}}},
+		{key: "43", dir: pack.JaToKo, source: "c", problems: []pack.Problem{{ID: "p3", Level: "N2"}}},
+	}
+
+	got, ok := extendable(sets, pack.KoToJa, "N2")
+	if !ok || got.key != "42" {
+		t.Errorf("이어 받을 팩 = %+v, %v", got, ok)
+	}
+	// 레벨이 다르면 고르지 않는다.
+	if _, ok := extendable(sets, pack.KoToJa, "N1"); ok {
+		t.Error("레벨이 다른 팩을 골랐다")
+	}
+	// 레벨이 섞인 팩도 고르지 않는다 — 어느 레벨에 이어 받는지 알 수 없다.
+	mixed := []packSet{{key: "44", dir: pack.KoToJa, problems: []pack.Problem{
+		{ID: "p1", Level: "N2"}, {ID: "p2", Level: "N3"},
+	}}}
+	if _, ok := extendable(mixed, pack.KoToJa, "N2"); ok {
+		t.Error("레벨이 섞인 팩을 골랐다")
+	}
+}
+
+func TestExtendableSkipsFullPacks(t *testing.T) {
+	full := make([]pack.Problem, gen.MaxPack)
+	for i := range full {
+		full[i] = pack.Problem{ID: "p", Level: "N2"}
+	}
+	sets := []packSet{{key: "41", dir: pack.KoToJa, problems: full}}
+	if _, ok := extendable(sets, pack.KoToJa, "N2"); ok {
+		t.Error("꽉 찬 팩에 이어 받으려 한다")
 	}
 }
