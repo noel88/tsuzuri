@@ -984,6 +984,12 @@ func (a *app) fetchPack() error {
 	if n, err := strconv.Atoi(strings.TrimSpace(sizeLine)); err == nil && n > 0 {
 		count = n
 	}
+	if per := share(count, len(dirs), 0); per > gen.MaxPack {
+		a.notice(fmt.Sprintf("팩 하나에는 %d문항까지 담습니다. %d개로 줄여서 받겠습니다.",
+			gen.MaxPack, gen.MaxPack*len(dirs)))
+		count = gen.MaxPack * len(dirs)
+	}
+
 	// 많이 요청하면 여러 번 나눠 부른다.
 	//
 	// 한 번에 다 만들 수는 없다 — 장문이 섞이면 한 문항이 길어서 응답
@@ -1016,6 +1022,16 @@ func (a *app) fetchPack() error {
 	done, batch := 0, 0
 	for i, dir := range dirs {
 		want := share(count, len(dirs), i)
+
+		// 방향마다 팩 파일 하나에 모은다.
+		//
+		// 나눠 부르는 것은 응답 한도 때문이지 사용자가 나눠 받고 싶어서가
+		// 아니다. 자료실에 열두 줄이 생기면 어디까지 풀었는지도 열두 군데로
+		// 갈린다. 묶음마다 지금까지 받은 것을 통째로 다시 쓰므로, 도중에
+		// 실패해도 앞서 받은 것은 그 파일에 남는다.
+		var all []pack.Problem
+		path := ""
+
 		for want > 0 {
 			n := want
 			if n > gen.MaxCount {
@@ -1034,20 +1050,21 @@ func (a *app) fetchPack() error {
 
 			ps, bad, err := gen.Generate(context.Background(), client, spec)
 			if err != nil {
-				// 앞서 받은 팩은 이미 파일로 남아 있다. 여기서 멈추되
+				// 앞서 받은 것은 이미 파일로 남아 있다. 여기서 멈추되
 				// 무엇까지 받았는지 알린다.
 				if done > 0 {
 					a.notice(fmt.Sprintf("여기까지 %d문항을 받아 두었습니다. 나머지는 8번으로 다시 받으세요.", done))
 				}
 				return err
 			}
-			path, err := gen.WritePack(filepath.Join(a.dataDir, "packs"), spec, ps, time.Now())
+			all = append(all, ps...)
+			path, err = gen.WritePackAt(path, filepath.Join(a.dataDir, "packs"), spec, all, time.Now())
 			if err != nil {
 				return err
 			}
 			done += len(ps)
-			msg := fmt.Sprintf("[%d/%d] %d문항을 받았습니다 (%s): %s",
-				batch, batches, len(ps), lengthSummary(ps), filepath.Base(path))
+			msg := fmt.Sprintf("[%d/%d] %d문항 (%s) — %s에 %d문항",
+				batch, batches, len(ps), lengthSummary(ps), filepath.Base(path), len(all))
 			if len(bad) > 0 {
 				// 요청한 수보다 적게 받았으면 왜 그런지 알려야 한다. 모르면
 				// 같은 금액을 또 쓰면서 같은 일이 반복된다.

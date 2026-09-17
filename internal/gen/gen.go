@@ -112,6 +112,13 @@ func lengthMix(count int) (short, mid, long int) {
 	return short, mid, long
 }
 
+// MaxPack은 팩 파일 하나에 담을 수 있는 문항 수다.
+//
+// 팩은 통째로 읽어 메모리에 올린다. 300문항이면 제시문·참조·채점 근거를
+// 합쳐 수백 KB이고, RAM 1GB 기기에서도 사전에 비하면 미미하다. 그보다 더
+// 키우면 자료실 한 줄이 「언제 다 푸나」 싶은 덩어리가 된다.
+const MaxPack = 300
+
 // MaxCount는 한 번에 만들 수 있는 문항 수다.
 //
 // 응답 한도(64000 토큰)가 정한 값이다. 장문이 섞이면 한 문항이 1200자까지
@@ -295,6 +302,18 @@ func safeName(s string) string {
 	return b.String()
 }
 
+// WritePackAt은 ps를 path에 쓴다. path가 비면 이름을 새로 지어 만든다.
+//
+// 여러 번 나눠 받은 것을 한 팩으로 모을 때 쓴다. 묶음마다 지금까지 받은
+// 것을 통째로 다시 쓴다 — 이어 붙이기가 아니라 다시 쓰기다. 임시 파일에
+// 다 쓰고 제 이름을 주므로, 도중에 전원이 끊겨도 앞서 받은 팩이 남는다.
+func WritePackAt(path, dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
+	if path == "" {
+		return WritePack(dir, s, ps, now)
+	}
+	return writePack(path, dir, s, ps)
+}
+
 // WritePack은 팩을 새 파일로 쓴다. 기존 팩을 절대 덮지 않는다.
 func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -313,7 +332,14 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 		}
 		path = filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", base, n))
 	}
+	return writePack(path, dir, s, ps)
+}
 
+// writePack은 ps를 path에 통째로 쓴다.
+func writePack(path, dir string, s Spec, ps []pack.Problem) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
 	// 최종 이름에 바로 쓰지 않는다.
 	//
 	// 쓰는 도중에 전원이 끊기면 packs/ 안에 잘린 팩이 남는다. 방금 값을
@@ -331,10 +357,19 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 	// 모델은 매번 p001부터 번호를 매기므로 팩끼리 ID가 겹친다. 답안은
 	// 문제 ID만 기억하기 때문에, 겹치면 엉뚱한 문제로 채점하고 그 비용을
 	// 청구받는다. 파일명은 시각까지 포함하므로 팩마다 다르다.
-	prefix := strings.TrimSuffix(filepath.Base(path), ".jsonl") + "/"
+	//
+	// 한 팩을 여러 번 나눠 받으면 묶음끼리도 겹친다 — 묶음 번호를 함께 단다.
+	// 이미 네임스페이스가 붙은 것(앞선 묶음에서 받아 둔 것)은 그대로 둔다.
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	round := ""
+	if s.Round > 1 {
+		round = fmt.Sprintf("b%d-", s.Round)
+	}
 	enc := json.NewEncoder(f)
 	for _, p := range ps {
-		p.ID = prefix + p.ID
+		if !strings.Contains(p.ID, "/") {
+			p.ID = base + "/" + round + p.ID
+		}
 		if err := enc.Encode(p); err != nil {
 			f.Close()
 			return "", err
