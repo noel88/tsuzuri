@@ -33,8 +33,17 @@ const systemPrompt = `당신은 한국어 화자를 위한 일본어 작문 학�
   교과서 예문 같은 인공적인 문장은 피하세요.
 - reference는 **유일한 정답이 아니라 모범 예시 하나**입니다. 학습자가
   다른 표현으로 같은 뜻을 쓸 수 있다는 전제로 작성하세요.
-- key_points는 그 레벨에서 연습 가치가 있는 표현 2~4개입니다.
-  조사 하나처럼 너무 작은 것이나, 문장 전체처럼 너무 큰 것은 피하세요.
+- key_points는 **reference 안에 글자 그대로 들어 있는 짧은 표현** 2~4개입니다.
+  채점기가 학습자의 답안에서 이 문자열을 찾아 확인하므로, 설명문을 쓰면
+  절대 찾지 못합니다.
+    좋음: "思ったより", "〜ていた", "ことにする", "気力"
+    나쁨: "원인·이유의 て형 접속(忙しくて)"   ← 설명문
+    나쁨: "자동사 壊れる와 타동사 壊す 구별"   ← 설명문
+    나쁨: "〜みたいだ / 〜ようだ"              ← 여러 개를 한 항목에
+  괄호, 슬래시, 쉼표, 한국어 설명을 넣지 마세요. 활용형은 사전형 대신
+  reference에 나온 그대로 쓰세요. 조사 하나처럼 너무 작은 것이나 문장
+  전체처럼 너무 큰 것은 피하세요.
+- traps에는 설명을 자유롭게 쓰세요. 거기는 사람이 읽는 자리입니다.
 - traps는 한국어 화자가 이 문장에서 실제로 저지르는 오류입니다.
   없으면 빈 배열로 두세요.
 - style은 문제가 요구하는 문체입니다. plain(보통체) 또는 polite(정중체).
@@ -46,15 +55,18 @@ var problemSchema = map[string]any{
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"id":         map[string]any{"type": "string"},
-				"dir":        map[string]any{"type": "string", "enum": []string{"ko2ja", "ja2ko"}},
-				"level":      map[string]any{"type": "string"},
-				"topic":      map[string]any{"type": "string"},
-				"prompt":     map[string]any{"type": "string"},
-				"reference":  map[string]any{"type": "string"},
-				"key_points": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"traps":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"style":      map[string]any{"type": "string", "enum": []string{"plain", "polite"}},
+				"id":        map[string]any{"type": "string"},
+				"dir":       map[string]any{"type": "string", "enum": []string{"ko2ja", "ja2ko"}},
+				"level":     map[string]any{"type": "string"},
+				"topic":     map[string]any{"type": "string"},
+				"prompt":    map[string]any{"type": "string"},
+				"reference": map[string]any{"type": "string"},
+				"key_points": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string", "maxLength": 20},
+				},
+				"traps": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"style": map[string]any{"type": "string", "enum": []string{"plain", "polite"}},
 			},
 			"required":             []string{"id", "dir", "level", "topic", "prompt", "reference", "key_points", "traps", "style"},
 			"additionalProperties": false,
@@ -104,6 +116,11 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 			bad = append(bad, fmt.Sprintf("%d번째(%v)", i+1, err))
 			continue
 		}
+		p, dropped := pruneKeyPoints(p)
+		if len(dropped) > 0 {
+			bad = append(bad, fmt.Sprintf("%d번째(모범답안에 없는 핵심 표현 %d개 제거: %s)",
+				i+1, len(dropped), strings.Join(dropped, " / ")))
+		}
 		if seen[p.ID] {
 			bad = append(bad, fmt.Sprintf("%d번째(id %q 중복)", i+1, p.ID))
 			continue
@@ -122,6 +139,40 @@ func directionLabel(d pack.Direction) string {
 		return "한국어 제시문 → 일본어로 작문"
 	}
 	return "일본어 제시문 → 한국어로 작문"
+}
+
+// pruneKeyPoints는 모범답안에 실제로 없는 핵심 표현을 걸러낸다.
+//
+// 모델이 "원인·이유의 て형 접속(忙しくて)"처럼 설명문을 넣으면 채점기가
+// 답안에서 절대 찾지 못해, 모범답안을 그대로 써도 전부 "빠짐"으로 뜬다.
+// 프롬프트로 막되, 그것만 믿지 않는다.
+func pruneKeyPoints(p pack.Problem) (pack.Problem, []string) {
+	ref := squeeze(stripTilde(p.Reference))
+	kept := make([]string, 0, len(p.KeyPoints))
+	var dropped []string
+	for _, kp := range p.KeyPoints {
+		needle := squeeze(stripTilde(kp))
+		if needle != "" && strings.Contains(ref, needle) {
+			kept = append(kept, kp)
+			continue
+		}
+		dropped = append(dropped, kp)
+	}
+	p.KeyPoints = kept
+	return p, dropped
+}
+
+// stripTilde와 squeeze는 analyze.Coverage가 쓰는 정규화와 같아야 한다.
+// 거기서 찾을 수 없는 표현은 여기서도 걸러야 하기 때문이다.
+func stripTilde(s string) string {
+	for _, t := range []string{"〜", "～", "~"} {
+		s = strings.ReplaceAll(s, t, "")
+	}
+	return strings.TrimSpace(s)
+}
+
+func squeeze(s string) string {
+	return strings.Join(strings.Fields(s), "")
 }
 
 func validate(p pack.Problem, s Spec) error {
