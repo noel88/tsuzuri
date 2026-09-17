@@ -56,7 +56,9 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	var right []string
 	right = append(right, Box("자 료 실")...)
 	if len(choices) == 0 {
-		right = append(right, "  (팩이 없습니다. packs/ 에 넣으세요)")
+		// 기기 앞에 앉은 사람에게 파일 경로는 쓸모가 없다. 셸로 나가지
+		// 않고 여기서 할 수 있는 일을 말한다.
+		right = append(right, "  (팩이 없습니다. 8번으로 받으세요)")
 	}
 	for _, c := range choices {
 		right = append(right, Entry(c.Key, c.Label, c.Value, rightW))
