@@ -7,7 +7,6 @@ import (
 
 	"github.com/noel88/tsuzuri/internal/pack"
 	"github.com/noel88/tsuzuri/internal/store"
-	"github.com/noel88/tsuzuri/internal/ui"
 )
 
 func writeProblem(t *testing.T, dir string, p pack.Problem) {
@@ -40,13 +39,14 @@ func TestFirstPackKeyMatchesMenuShortcut(t *testing.T) {
 		t.Fatalf("세트 개수 = %d, 기대 1", len(sets))
 	}
 
-	key, ok := ui.ParseMenuKey("1")
-	if !ok {
-		t.Fatal("1은 종료가 아니다")
+	// 「1. 드릴 시작」은 자료실 첫 팩이다. 그 뜻은 dispatch가 안다 —
+	// 번호를 쳐서 오든 화살표로 골라서 오든 같은 곳으로 가야 하므로,
+	// 입력을 읽는 자리에서 번호를 바꾸지 않는다.
+	if _, found := findSet(sets, "1"); found {
+		t.Error("「1」이 팩 번호로 잡힌다. 그러면 메뉴 항목과 팩이 겹친다")
 	}
-	if _, found := findSet(sets, key); !found {
-		t.Errorf("「1. 드릴 시작」이 첫 세트(%q)에 닿지 않는다 — 키가 %q로 매겨졌다",
-			key, sets[0].key)
+	if sets[0].key != "41" {
+		t.Errorf("첫 세트 = %q, 기대 \"41\"", sets[0].key)
 	}
 }
 

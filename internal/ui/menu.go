@@ -181,14 +181,16 @@ func point(line string, on bool) string {
 
 // ParseMenuKey는 초기화면 입력을 해석한다.
 // 번호를 고르면 그 키를, 종료면 빈 문자열과 false를 돌려준다.
+//
+// 번호를 다른 번호로 바꾸지 않는다. 예전에는 「1」을 첫 팩 번호로 바꿔
+// 돌려줬는데, 그 변환이 입력을 읽는 자리에 숨어 있어서 화살표로 고른
+// 길은 그것을 거치지 않았다 — 「드릴 시작」을 고르면 그런 번호가 없다고
+// 답했다. 번호의 뜻은 그것을 처리하는 쪽이 안다.
 func ParseMenuKey(s string) (key string, ok bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
 	case "x", "q":
 		return "", false
-	case "1":
-		// 「드릴 시작」은 첫 팩을 뜻한다.
-		return "41", true
 	}
 	return s, true
 }

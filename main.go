@@ -261,6 +261,13 @@ func (a *app) chooseMenu(choices []ui.Choice, st ui.Status) (key string, eof, ok
 // dispatch는 초기화면의 선택을 처리한다. 종료해야 하면 true를 돌려준다.
 func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	switch key {
+	case "1":
+		// 「드릴 시작」은 자료실 첫 팩을 뜻한다.
+		if len(sets) == 0 {
+			a.notice("아직 팩이 없습니다. 8번으로 받으세요.")
+			return false, nil
+		}
+		return a.drill(sets[0])
 	case "2":
 		return a.resume(sets)
 	case "3":
