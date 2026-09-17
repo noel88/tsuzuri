@@ -198,3 +198,29 @@ func TestRenderResultFitsTerminalWithMultilineAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestClearEmitsAnsiAndCanBeDisabled(t *testing.T) {
+	var b strings.Builder
+	t.Setenv("TSUZURI_NO_CLEAR", "")
+	Clear(&b)
+	if !strings.Contains(b.String(), "\033[2J") {
+		t.Errorf("화면 지우기 시퀀스가 있어야 한다: %q", b.String())
+	}
+
+	var off strings.Builder
+	t.Setenv("TSUZURI_NO_CLEAR", "1")
+	Clear(&off)
+	if strings.Contains(off.String(), "\033[") {
+		t.Errorf("끄면 제어 문자가 없어야 한다: %q", off.String())
+	}
+}
+
+func TestBoxWidthFillsTheScreen(t *testing.T) {
+	// 포메라는 128칸이다. 70칸으로 고정하면 좌우가 크게 빈다.
+	if got := BoxWidth(128); got < 120 {
+		t.Errorf("BoxWidth(128) = %d — 화면을 채워야 한다", got)
+	}
+	if got := BoxWidth(40); got > 40 {
+		t.Errorf("좁은 화면에서 넘치면 안 된다: %d", got)
+	}
+}

@@ -2,11 +2,26 @@ package ui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/noel88/tsuzuri/internal/analyze"
 	"github.com/noel88/tsuzuri/internal/pack"
 )
+
+// Clear는 화면을 지우고 커서를 맨 위로 옮긴다.
+//
+// 지우지 않으면 앱을 켜기 전의 셸 출력이 위에 남아 화면이 어수선하다.
+// fbterm에서 기본 ANSI(ESC[2J, ESC[H)는 동작한다 — M0에서 글리프와 함께
+// 확인했다. 혹시 어긋나는 터미널이 있으면 TSUZURI_NO_CLEAR=1로 끌 수 있다.
+func Clear(w io.Writer) {
+	if os.Getenv("TSUZURI_NO_CLEAR") != "" {
+		fmt.Fprintln(w)
+		return
+	}
+	fmt.Fprint(w, "\033[2J\033[H")
+}
 
 // Status는 화면 하단·상단에 표시할 현재 상태다.
 type Status struct {

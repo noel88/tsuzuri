@@ -10,6 +10,7 @@
 | `tsuzuri` | **필수** | armv7 정적 바이너리 (46MB) |
 | `run.sh` | 권장 | 키를 환경변수로 넘겨 실행한다 |
 | `set-key.sh` | 권장 | API 키를 화면에 안 보이게 입력받아 저장한다 |
+| `install.sh` | 선택 | `tsuzuri` 단축어를 만든다 |
 | `packs/*.jsonl` | 권장 | 시작 팩 10문항(양방향 5개씩)이 들어 있다 |
 | `config.toml` | 선택 | 없으면 기본값. 키는 `run.sh` 쪽을 권한다 |
 | `m0-check.sh` | 검증용 | 실기 확인 스크립트 |
@@ -80,6 +81,17 @@ cd <tsuzuri 디렉터리>
 chmod +x tsuzuri run.sh set-key.sh m0-check.sh
 sh run.sh
 ```
+
+매번 디렉터리로 옮기기 번거로우면 단축어를 만든다. 한 번만 하면 된다.
+
+```sh
+sh install.sh
+```
+
+그 뒤로는 어디서든 `tsuzuri` 만 치면 된다.
+
+앱은 화면을 지우고 그린다. 터미널이 이를 제대로 처리하지 못하면
+`TSUZURI_NO_CLEAR=1 tsuzuri` 로 끌 수 있다.
 
 터미널 폭은 자동으로 감지한다(TIOCGWINSZ). 감지가 안 되는 환경이라면
 `COLUMNS`를 export해서 넘길 수 있다:

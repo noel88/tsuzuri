@@ -2,17 +2,17 @@ package ui
 
 import "strings"
 
-// maxBoxWidth는 본문 블록의 최대 폭이다.
-// 이보다 넓어지면 한 줄이 너무 길어 읽기 나빠진다.
-const maxBoxWidth = 70
-
-// BoxWidth는 터미널 폭에 맞는 본문 블록 폭을 고른다.
-// 좁은 화면에서는 여백을 포기하고 화면을 꽉 쓴다.
+// BoxWidth는 본문 블록 폭이다. 화면을 꽉 채운다.
+//
+// 포메라 fbterm은 128칸이라 70칸으로 고정하면 좌우에 큰 여백이 남아 화면이
+// 비어 보인다. 기기를 손에 들고 쓰는 물건이라 화면을 다 쓰는 편이 낫다.
+// 긴 줄은 wrap()이 표시폭 기준으로 접는다.
 func BoxWidth(termW int) int {
-	if termW < maxBoxWidth+4 {
-		return termW
+	w := termW - 2
+	if w < 40 {
+		w = termW
 	}
-	return maxBoxWidth
+	return w
 }
 
 // Margin은 블록을 화면 가운데 두기 위한 왼쪽 여백이다.
