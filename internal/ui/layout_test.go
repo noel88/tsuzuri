@@ -123,7 +123,7 @@ func TestScreensEndOnThePromptLine(t *testing.T) {
 	// 치는 답이 프롬프트 옆이 아니라 그 아래 여백 밖에 찍힌다.
 	// 스크린샷을 찍어 보고서야 드러났다.
 	screens := map[string]string{
-		"출제":   RenderProblem(sampleProblem(), sampleStatus(), 92),
+		"출제":   RenderProblem(sampleProblem(), sampleStatus(), 92, -1),
 		"결과":   RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92, 0),
 		"초기화면": RenderMenu([]Choice{{Key: "41", Label: "ko2ja  N3 일상", Value: "2"}}, Status{}, 92, Cursor{}),
 		"설정":   RenderSetup(config.Default(), Status{}, 92),

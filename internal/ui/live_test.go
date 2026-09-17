@@ -23,7 +23,7 @@ func TestLiveScreen(t *testing.T) {
 	st := Status{Index: 12, Total: 47, QueueLen: 12, Online: false}
 
 	fmt.Print("\n### 출제 화면\n")
-	fmt.Print(RenderProblem(p, st, 92))
+	fmt.Print(RenderProblem(p, st, 92, -1))
 
 	for _, ans := range []string{
 		"昨日初めて行ったカフェは静かくて、ずっと座ってました。",

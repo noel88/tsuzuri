@@ -49,7 +49,8 @@ type Status struct {
 // RenderProblem은 답안 입력 전 화면이다.
 //
 // 참조 번역을 노출하지 않는다. 답을 미리 보여주면 드릴이 성립하지 않는다.
-func RenderProblem(p pack.Problem, st Status, termW int) string {
+// sel이 0 이상이면 명령 안내 대신 고르기 줄을 그린다.
+func RenderProblem(p pack.Problem, st Status, termW int, sel int) string {
 	w := BoxWidth(termW)
 
 	var lines []string
@@ -57,10 +58,16 @@ func RenderProblem(p pack.Problem, st Status, termW int) string {
 	lines = append(lines, "")
 	lines = append(lines, wrapIndent(p.Prompt, w-4, "  ")...)
 	lines = append(lines, "")
+	commands := "주요명령(긴 답 :e)  메뉴(M)  종료(X)  — 빈 줄에서 ⏎ 를 누르면 고를 수 있습니다"
+	prompt := "답 >>"
+	if sel >= 0 {
+		commands = ActionBar(AnswerActions, sel)
+		prompt = "선택 >>"
+	}
 	lines = append(lines, CommandBarWith(
 		fmt.Sprintf("큐 %d건 · %s", st.QueueLen, connLabel(st.Online)),
-		"주요명령(긴 답 :e)  메뉴(M)  종료(X)",
-		"답 >>", w)...)
+		commands,
+		prompt, w)...)
 
 	return Page(lines, termW, w)
 }

@@ -80,28 +80,25 @@ func (s *Session) Run() (Outcome, error) {
 		p := s.Problems[i]
 		st := ui.Status{Index: i + 1, Total: len(s.Problems), QueueLen: queueLen, Online: s.Online}
 
-		ui.Clear(s.Out)
-		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW))
-
-		answer, eof, err := s.readAnswer()
+		answer, cmd, eof, err := s.askAnswer(p, st)
 		if err != nil {
 			return OutcomeDone, err
 		}
-		trimmed := strings.TrimSpace(answer)
-
-		// 답안 자리에서도 M/X로 빠져나갈 수 있다.
-		if trimmed != "" {
-			switch ui.ParseCommand(trimmed) {
-			case ui.CmdMenu:
-				return OutcomeMenu, nil
-			case ui.CmdQuit:
-				return OutcomeQuit, nil
-			}
-		}
-		if trimmed == "" {
+		switch cmd {
+		case ui.CmdMenu:
+			return OutcomeMenu, nil
+		case ui.CmdQuit:
+			return OutcomeQuit, nil
+		case ui.CmdNext:
 			if eof {
 				return OutcomeDone, nil
 			}
+			i++
+			continue
+		}
+		// 에디터를 열었다가 빈 채로 닫는 일이 있다. 빈 답안을 저장하면
+		// 첨삭 대기열에 들어가 값을 치르고, 진도에도 푼 것으로 잡힌다.
+		if strings.TrimSpace(answer) == "" {
 			i++
 			continue
 		}
@@ -229,15 +226,79 @@ func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Ana
 	}
 }
 
-// readAnswer는 답안 한 줄을 읽되, ":e"면 에디터를 연다.
-func (s *Session) readAnswer() (string, bool, error) {
-	line, eof, err := ui.ReadLine(s.In)
-	if err != nil {
-		return "", eof, err
+// askAnswer는 답안을 받는다. 답 대신 다른 일을 고르면 그 명령을 돌려준다.
+//
+// 답을 치는 동안에는 키를 하나씩 받지 않는다. 그 화면은 터미널의 보통
+// 입력 경로를 그대로 써야 입력기가 동작하고 친 글자가 화면에 보인다.
+// 빈 줄에서 Enter를 누른 순간에만 — 아무것도 치고 있지 않을 때만 —
+// 고르기 줄을 띄운다.
+func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, bool, error) {
+	for {
+		ui.Clear(s.Out)
+		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW, -1))
+
+		line, eof, err := ui.ReadLine(s.In)
+		if err != nil {
+			return "", ui.CmdStay, eof, err
+		}
+		trimmed := strings.TrimSpace(line)
+
+		if ui.IsEditorRequest(line) {
+			text, err := ui.ReadFromEditor("", "")
+			return text, ui.CmdStay, eof, err
+		}
+		// 답안 자리에서도 M/X로 빠져나갈 수 있다.
+		if trimmed != "" {
+			switch cmd := ui.ParseCommand(trimmed); cmd {
+			case ui.CmdMenu, ui.CmdQuit:
+				return "", cmd, eof, nil
+			}
+			return line, ui.CmdStay, eof, nil
+		}
+
+		if eof || s.keys == nil {
+			// 예전 그대로 — 빈 줄은 건너뛰기다.
+			return "", ui.CmdNext, eof, nil
+		}
+
+		switch cmd, err := s.chooseAnswerAction(p, st); {
+		case err != nil:
+			return "", ui.CmdStay, false, err
+		case cmd == ui.CmdEdit:
+			text, err := ui.ReadFromEditor("", "")
+			return text, ui.CmdStay, false, err
+		case cmd == ui.CmdStay:
+			// 다시 답 치는 화면으로.
+		default:
+			return "", cmd, false, nil
+		}
 	}
-	if ui.IsEditorRequest(line) {
-		text, err := ui.ReadFromEditor("", "")
-		return text, eof, err
+}
+
+// chooseAnswerAction은 답안 화면의 고르기 줄을 돌린다.
+func (s *Session) chooseAnswerAction(p pack.Problem, st ui.Status) (ui.Command, error) {
+	sel := 0
+	for {
+		ui.Clear(s.Out)
+		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW, sel))
+
+		k, err := s.keys.Read()
+		if err != nil {
+			return ui.CmdStay, err
+		}
+		switch k.Key {
+		case ui.KeyQuit:
+			return ui.CmdQuit, nil
+		case ui.KeyEnter:
+			return ui.ActionAt(ui.AnswerActions, sel), nil
+		case ui.KeyLeft, ui.KeyRight:
+			sel = ui.MoveAction(sel, k.Key, len(ui.AnswerActions))
+		case ui.KeyEscape:
+			return ui.CmdStay, nil
+		case ui.KeyRune:
+			if cmd := ui.ParseCommand(string(k.Rune)); cmd != ui.CmdNext {
+				return cmd, nil
+			}
+		}
 	}
-	return line, eof, nil
 }

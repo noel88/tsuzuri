@@ -22,6 +22,20 @@ var ResultActions = []Action{
 	{CmdQuit, "X", "종료"},
 }
 
+// AnswerActions는 답안 화면에서 빈 줄로 Enter를 눌렀을 때의 선택지다.
+//
+// 답을 치는 동안에는 이 줄이 뜨지 않는다. 그 화면은 터미널의 보통 입력
+// 경로를 그대로 써야 하고 — 그래야 입력기가 동작하고 친 글자가 화면에
+// 보인다 — 키를 하나씩 받으려면 그 에코를 우리가 꺼야 하기 때문이다.
+// 아무것도 치고 있지 않은 이 순간에만 키를 하나씩 받는다.
+var AnswerActions = []Action{
+	{CmdStay, "", "계속 쓰기"},
+	{CmdEdit, ":e", "긴 답"},
+	{CmdNext, "", "건너뛰기"},
+	{CmdMenu, "M", "메뉴"},
+	{CmdQuit, "X", "종료"},
+}
+
 // ActionAt은 고른 자리의 명령을 돌려준다.
 func ActionAt(as []Action, sel int) Command {
 	if sel < 0 || sel >= len(as) {
