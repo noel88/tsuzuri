@@ -219,6 +219,8 @@ type Stats struct {
 	Days       int // 푼 날 수
 	Streak     int // 연속으로 푼 날
 	Feedback   int // 받은 첨삭 수
+	Packs      int // 자료실의 팩 수
+	DonePacks  int // 그중 끝까지 푼 팩 수
 	Due        int
 	Waiting    int
 	Graduated  int
