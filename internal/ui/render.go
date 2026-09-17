@@ -34,12 +34,23 @@ func ClearEnabled() bool {
 
 // Status는 화면 하단·상단에 표시할 현재 상태다.
 type Status struct {
-	Index    int  // 지금 몇 번째 문제인지 (1부터)
-	Total    int  // 전체 문제 수
-	QueueLen int  // 첨삭 대기 건수
-	Feedback int  // 받은 첨삭 건수
-	Due      int  // 복습할 문제 수
+	Index    int // 지금 몇 번째 문제인지 (1부터)
+	Total    int // 전체 문제 수
+	QueueLen int // 첨삭 대기 건수
+	Feedback int // 받은 첨삭 건수
+	Due      int // 복습할 문제 수
+	Packs    int // 자료실의 팩 수 (접어 둔 것 포함)
+
+	// StartKey는 「드릴 시작」이 열 팩의 번호다.
+	StartKey string
 	Online   bool // 네트워크 연결 여부
+
+	// Warn은 화면 위에 한 번 띄울 알림이다.
+	//
+	// 화면 밖에 따로 찍으면 안 된다. 본문이 화면을 꽉 채우는 긴 문항에서는
+	// 그 줄이 위로 밀려 올라가 보이지 않는다 — 사용자는 친 답안이 사라진
+	// 것만 보고 이유는 못 본다.
+	Warn string
 
 	// Now는 「며칠 뒤」를 계산할 기준 시각이다. 비면 time.Now를 쓴다.
 	// 테스트가 화면을 고정된 시각으로 그리기 위해 받는다.
@@ -55,6 +66,10 @@ func RenderProblem(p pack.Problem, st Status, termW int, sel int) string {
 
 	var lines []string
 	lines = append(lines, Frame(problemTitle(p), indexLabel(st), w)...)
+	if st.Warn != "" {
+		lines = append(lines, "")
+		lines = append(lines, wrapIndent("! "+st.Warn, w-4, "  ")...)
+	}
 	lines = append(lines, "")
 	lines = append(lines, wrapIndent(p.Prompt, w-4, "  ")...)
 	lines = append(lines, "")

@@ -87,7 +87,7 @@ func TestClampCursorAfterPacksDisappear(t *testing.T) {
 
 func TestDrillStartSaysWhichPackItOpens(t *testing.T) {
 	// 자료실이 여러 줄이면 「맨 위」가 어느 팩인지 눌러 보기 전에는 모른다.
-	out := RenderMenu(packs(3), Status{}, 100, Cursor{})
+	out := RenderMenu(packs(3), Status{StartKey: "41"}, 100, Cursor{})
 	if !strings.Contains(out, "1. 드릴 시작 (41)") {
 		t.Errorf("어느 팩을 여는지 안 적혀 있다:\n%s", out)
 	}

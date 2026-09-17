@@ -21,8 +21,11 @@ type Spec struct {
 	Topic string
 	Count int
 
-	// Round는 같은 조건으로 몇 번째 묶음인지다 (1부터).
-	// 여러 번 나눠 받을 때 앞선 묶음과 겹치지 않게 하려고 넘긴다.
+	// Round는 같은 방향으로 몇 번째 묶음인지다 (1부터).
+	//
+	// 프롬프트 힌트로만 쓴다. 같은 조건으로 계속 부르면 비슷한 상황이
+	// 되풀이되기 때문이다. ID에는 쓰지 않는다 — ID는 파일에 들어갈 때
+	// 한 번만 확정한다.
 	Round int
 }
 
@@ -262,6 +265,11 @@ func squeeze(s string) string {
 }
 
 func validate(p pack.Problem, s Spec) error {
+	if strings.Contains(p.ID, "/") {
+		// id에 /가 들어오면 팩 이름을 붙인 것과 구별되지 않고, 두 팩이
+		// 같은 id를 내면 뒤엣 팩이 통째로 건너뛰어진다.
+		return fmt.Errorf("id에 /를 쓸 수 없습니다: %q", p.ID)
+	}
 	if p.Dir != s.Dir {
 		return fmt.Errorf("방향이 %q인데 %q를 요청했습니다", p.Dir, s.Dir)
 	}
@@ -312,20 +320,12 @@ func safeName(s string) string {
 	return b.String()
 }
 
-// WritePackAt은 ps를 path에 쓴다. path가 비면 이름을 새로 지어 만든다.
+// NewPackPath는 새 팩 파일의 이름을 정한다. 파일을 만들지는 않는다.
 //
-// 여러 번 나눠 받은 것을 한 팩으로 모을 때 쓴다. 묶음마다 지금까지 받은
-// 것을 통째로 다시 쓴다 — 이어 붙이기가 아니라 다시 쓰기다. 임시 파일에
-// 다 쓰고 제 이름을 주므로, 도중에 전원이 끊겨도 앞서 받은 팩이 남는다.
-func WritePackAt(path, dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
-	if path == "" {
-		return WritePack(dir, s, ps, now)
-	}
-	return writePack(path, dir, s, ps)
-}
-
-// WritePack은 팩을 새 파일로 쓴다. 기존 팩을 절대 덮지 않는다.
-func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
+// 이름을 먼저 정하는 것이 중요하다. 문제 ID는 팩 이름으로 네임스페이스를
+// 다는데, 그것을 쓰는 순간에 계산하면 같은 팩을 다시 쓸 때마다 ID가 바뀐다.
+// 이름을 먼저 알아 두고 ID를 한 번만 확정한다.
+func NewPackPath(dir string, s Spec, now time.Time) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
@@ -333,79 +333,82 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 	// 들어가면 방금 값을 치른 팩을 저장하지 못하고 잃는다.
 	base := fmt.Sprintf("%s-%s-%s", s.Dir, safeName(s.Level), now.Format("20060102-150405"))
 	path := filepath.Join(dir, base+".jsonl")
-	// 이름이 겹치면 번호를 붙인다. NotExist가 아닌 오류(권한, SD카드 I/O)는
-	// 이름을 바꿔도 사라지지 않으므로 루프를 빠져나가 O_EXCL이 판정하게 한다.
 	for n := 2; n < 100; n++ {
-		_, err := os.Stat(path)
-		if err != nil {
+		if _, err := os.Stat(path); err != nil {
 			break
 		}
 		path = filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", base, n))
 	}
-	return writePack(path, dir, s, ps)
+	return path, nil
 }
 
-// writePack은 ps를 path에 통째로 쓴다.
-func writePack(path, dir string, s Spec, ps []pack.Problem) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	// 최종 이름에 바로 쓰지 않는다.
-	//
-	// 쓰는 도중에 전원이 끊기면 packs/ 안에 잘린 팩이 남는다. 방금 값을
-	// 치른 팩이고, 그 상태를 앱 안에서 고칠 방법이 없다. 임시 이름으로
-	// 다 쓰고 디스크에 내린 뒤에 제 이름을 준다.
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(tmp) // 제 이름을 받았으면 지울 것이 없다
-
-	// ID를 팩 이름으로 네임스페이스한다.
-	//
-	// 모델은 매번 p001부터 번호를 매기므로 팩끼리 ID가 겹친다. 답안은
-	// 문제 ID만 기억하기 때문에, 겹치면 엉뚱한 문제로 채점하고 그 비용을
-	// 청구받는다. 파일명은 시각까지 포함하므로 팩마다 다르다.
-	//
-	// 한 팩을 여러 번 나눠 받으면 묶음끼리도 겹친다 — 묶음 번호를 함께 단다.
-	// 이미 네임스페이스가 붙은 것(앞선 묶음에서 받아 둔 것)은 그대로 둔다.
+// NameProblems는 문제에 최종 ID를 붙인다. 한 번만 부른다.
+//
+// 모델은 묶음마다 p001부터 번호를 매기므로 팩끼리, 묶음끼리 ID가 겹친다.
+// 답안은 문제 ID만 기억하기 때문에 겹치면 엉뚱한 문제로 채점하고 그 값을
+// 청구받는다. taken에는 그 팩에 이미 들어 있는 ID를 넣는다 — 며칠에 걸쳐
+// 이어 받아도 겹치지 않는다.
+//
+// **이미 파일에 있는 문제의 ID는 절대 건드리지 않는다.** 바뀌면 그 문제로
+// 낸 답안이 문제를 잃고, 첨삭도 복습도 그 답안을 찾지 못한다.
+func NameProblems(path string, taken map[string]bool, ps []pack.Problem) []pack.Problem {
 	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	round := ""
-	if s.Round > 1 {
-		round = fmt.Sprintf("b%d-", s.Round)
+	out := make([]pack.Problem, 0, len(ps))
+	for _, p := range ps {
+		p.ID = unique(base+"/"+p.ID, taken)
+		out = append(out, p)
 	}
-	// 그래도 겹치면 번호를 붙인다.
-	//
-	// 묶음 번호는 한 번의 받기 안에서만 늘어난다. 같은 팩에 며칠에 걸쳐
-	// 이어 받으면 번호가 다시 1부터라 또 겹친다. 겹친 채로 두면 답안이
-	// 엉뚱한 문제로 채점되고 그 값을 치르므로, 쓰는 자리에서 막는다.
-	seen := make(map[string]bool, len(ps))
+	return out
+}
+
+// AppendPack은 문제를 팩 파일 끝에 덧붙인다.
+//
+// 파일을 통째로 다시 쓰지 않는다. 다시 쓰면 묶음마다 300문항을 vfat SD에
+// 옮겨 적게 되고, 기존 이름 위로 rename 하는 그 순간에 전원이 끊기면 앞서
+// 받아 둔 것까지 통째로 잃는다. 덧붙이기는 잃을 것이 마지막 줄뿐이고,
+// 잘린 마지막 줄은 pack.Load가 봐준다.
+func AppendPack(path string, ps []pack.Problem) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	_, statErr := os.Stat(path)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
 	enc := json.NewEncoder(f)
 	for _, p := range ps {
-		if !strings.Contains(p.ID, "/") {
-			p.ID = base + "/" + round + p.ID
-		}
-		p.ID = unique(p.ID, seen)
 		if err := enc.Encode(p); err != nil {
 			f.Close()
-			return "", err
+			return err
 		}
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return "", err
+		return err
 	}
 	if err := f.Close(); err != nil {
+		return err
+	}
+	// 파일을 새로 만들었으면 디렉터리 항목까지 내린다. vfat에는 저널이 없다.
+	if statErr != nil {
+		if d, err := os.Open(dir); err == nil {
+			d.Sync()
+			d.Close()
+		}
+	}
+	return nil
+}
+
+// WritePack은 새 팩 파일을 만들어 문제를 쓴다.
+func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, error) {
+	path, err := NewPackPath(dir, s, now)
+	if err != nil {
 		return "", err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := AppendPack(path, NameProblems(path, map[string]bool{}, ps)); err != nil {
 		return "", err
-	}
-	// 이름 바꾸기까지 디스크에 내린다. vfat에는 저널이 없다.
-	if d, err := os.Open(dir); err == nil {
-		d.Sync()
-		d.Close()
 	}
 	return path, nil
 }

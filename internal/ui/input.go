@@ -146,13 +146,24 @@ func ReadFromEditor(editor, initial string) (string, error) {
 
 	cmd := exec.Command(editor, path)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
+	runErr := cmd.Run()
 
+	// 편집기가 0이 아닌 코드로 끝나도 파일부터 읽는다.
+	//
+	// vi의 :cq 처럼 일부러 실패로 끝내는 길이 있고, 편집기가 신호로 죽기도
+	// 한다. 그때 저장된 것을 안 읽으면 문단 하나를 통째로 다시 써야 한다.
+	// 쓴 것이 있으면 그것이 답이다.
 	b, err := os.ReadFile(path)
+	if err == nil {
+		if text := strings.TrimSpace(string(b)); text != "" {
+			return text, nil
+		}
+	}
+	if runErr != nil {
+		return "", runErr
+	}
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(b)), nil
+	return "", nil
 }

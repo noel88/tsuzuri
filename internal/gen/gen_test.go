@@ -323,30 +323,31 @@ func TestGenerateRefusesTooManyProblems(t *testing.T) {
 	}
 }
 
-func TestWritePackAtGathersBatchesIntoOneFile(t *testing.T) {
-	// 나눠 부르는 것은 응답 한도 때문이지 사용자가 나눠 받고 싶어서가
-	// 아니다. 자료실에 열두 줄이 생기면 진도도 열두 군데로 갈린다.
+func TestPackIDsStayStableAcrossBatches(t *testing.T) {
+	// 답안은 문제 ID만 기억한다. 이어 받으면서 기존 문항의 ID가 바뀌면
+	// 그 문제로 낸 답안이 문제를 잃고, 첨삭도 복습도 그 답안을 못 찾는다.
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 17, 15, 0, 0, 0, time.UTC)
 
-	b1 := []pack.Problem{{ID: "p001", Dir: pack.KoToJa, Prompt: "하나", Reference: "一"}}
-	path, err := WritePackAt("", dir, Spec{Dir: pack.KoToJa, Level: "N2", Round: 1}, b1, now)
+	path, err := NewPackPath(dir, Spec{Dir: pack.KoToJa, Level: "N2"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := map[string]bool{}
+
+	b1 := NameProblems(path, taken, []pack.Problem{{ID: "p001", Dir: pack.KoToJa, Prompt: "하나", Reference: "一"}})
+	if err := AppendPack(path, b1); err != nil {
+		t.Fatal(err)
+	}
+	first, err := pack.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// 두 번째 묶음은 같은 파일에 모은다. 앞 묶음도 함께 넘긴다.
-	loaded, err := pack.Load(path)
-	if err != nil {
+	// 두 번째 묶음. 모델은 또 p001부터 매긴다.
+	b2 := NameProblems(path, taken, []pack.Problem{{ID: "p001", Dir: pack.KoToJa, Prompt: "둘", Reference: "二"}})
+	if err := AppendPack(path, b2); err != nil {
 		t.Fatal(err)
-	}
-	b2 := append(loaded, pack.Problem{ID: "p001", Dir: pack.KoToJa, Prompt: "둘", Reference: "二"})
-	same, err := WritePackAt(path, dir, Spec{Dir: pack.KoToJa, Level: "N2", Round: 2}, b2, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if same != path {
-		t.Errorf("파일이 둘로 갈렸다: %s vs %s", same, path)
 	}
 
 	got, err := pack.Load(path)
@@ -356,13 +357,25 @@ func TestWritePackAtGathersBatchesIntoOneFile(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("문항 %d개, 기대 2개", len(got))
 	}
-	// 묶음마다 p001부터 매겨지므로 ID가 겹치면 안 된다. 겹치면 답안이
-	// 엉뚱한 문제로 채점되고 그 값을 치른다.
+	if got[0].ID != first[0].ID {
+		t.Errorf("앞 묶음의 ID가 바뀌었다: %q → %q", first[0].ID, got[0].ID)
+	}
 	if got[0].ID == got[1].ID {
 		t.Errorf("ID가 겹친다: %q", got[0].ID)
 	}
-	// 앞 묶음의 ID는 그대로 둔다. 바뀌면 이미 낸 답안이 문제를 잃는다.
-	if got[0].ID != loaded[0].ID {
-		t.Errorf("앞 묶음의 ID가 바뀌었다: %q → %q", loaded[0].ID, got[0].ID)
+}
+
+func TestNameProblemsLeavesExistingIDsAlone(t *testing.T) {
+	// 시작 팩의 ID에는 네임스페이스가 없다. 이어 받으면서 그것을 건드리면
+	// 이미 푼 답안이 통째로 고아가 된다 — 기본 경로에서 그랬다.
+	taken := map[string]bool{"s-ko2ja-01": true, "s-ko2ja-02": true}
+	got := NameProblems("/x/starter-ko2ja.jsonl", taken, []pack.Problem{{ID: "p001"}})
+
+	if len(got) != 1 || got[0].ID != "starter-ko2ja/p001" {
+		t.Errorf("새 문항의 ID = %+v", got)
+	}
+	// 기존 ID는 taken에만 있을 뿐 어디서도 바뀌지 않는다.
+	if !taken["s-ko2ja-01"] {
+		t.Error("기존 ID가 사라졌다")
 	}
 }

@@ -287,6 +287,20 @@ func (a *app) chooseMenu(choices []ui.Choice, st ui.Status) (key string, eof, ok
 func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	switch key {
 	case doneToggleKey:
+		solved, err := a.solvedByProblem()
+		if err != nil {
+			return false, err
+		}
+		folded := 0
+		for _, s := range sets {
+			if s.finished(solved) {
+				folded++
+			}
+		}
+		if folded == 0 {
+			a.notice("접어 둔 팩이 없습니다.")
+			return false, nil
+		}
 		a.showDone = !a.showDone
 		return false, nil
 	case "1":
@@ -330,17 +344,30 @@ func (a *app) startDrill(sets []packSet) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, set := range sets {
-		for i, pr := range set.problems {
-			if solved[pr.ID] {
-				continue
-			}
-			return a.drillFrom(set.problems, set.dir, i, set.key)
-		}
+	if set, i, ok := nextUnsolved(sets, solved); ok {
+		return a.drillFrom(set.problems, set.dir, i, set.key)
 	}
 	// 모두 다 풀었다. 처음부터 다시 낸다.
-	a.notice("자료실의 팩을 전부 풀었습니다. 첫 팩을 처음부터 다시 냅니다.")
-	return a.drill(sets[0])
+	//
+	// 알림을 먼저 띄우면 드릴이 화면을 지우면서 덮는다. 사용자는 「1번을
+	// 눌렀는데 이미 푼 문제가 나온다」만 보게 된다.
+	quit, err := a.drill(sets[0])
+	if err == nil && !quit {
+		a.notice("자료실의 팩을 전부 풀었기에 첫 팩을 처음부터 다시 냈습니다.")
+	}
+	return quit, err
+}
+
+// nextUnsolved는 다음에 낼 문제를 찾는다. 「드릴 시작」이 여는 자리다.
+func nextUnsolved(sets []packSet, solved map[string]bool) (packSet, int, bool) {
+	for _, set := range sets {
+		for i, pr := range set.problems {
+			if !solved[pr.ID] {
+				return set, i, true
+			}
+		}
+	}
+	return packSet{}, 0, false
 }
 
 func (a *app) drill(set packSet) (bool, error) {
@@ -532,7 +559,9 @@ func (a *app) archive(sets []packSet, solved map[string]bool) []ui.Choice {
 		}
 		out = append(out, ui.Choice{Key: s.key, Label: s.label(), Value: s.progress(solved)})
 	}
-	if done == 0 {
+	// 접을 것이 없으면 토글 줄도 없다. 전부 끝냈을 때는 접지 않으므로
+	// 「보기」를 눌러도 새로 보일 것이 없다 — 라벨과 결과가 어긋난다.
+	if done == 0 || allDone {
 		return out
 	}
 	label, value := "완료한 팩 보기", fmt.Sprintf("%d팩", done)
@@ -1024,13 +1053,20 @@ func (a *app) fetchPack() error {
 	// 청구된다. 실기에서 300문항을 한 번에 요청했다가 그렇게 잃었다.
 	//
 	// 묶음마다 팩 파일을 따로 쓴다. 도중에 실패해도 앞서 받은 것은 남는다.
-	batches := 0
+	batches, total := 0, 0
 	for i := range dirs {
-		batches += batchCount(share(count, len(dirs), i))
+		want := share(count, len(dirs), i)
+		if cand, ok := into[dirs[i]]; ok {
+			if room := gen.MaxPack - len(cand.problems); want > room {
+				want = room
+			}
+		}
+		total += want
+		batches += batchCount(want)
 	}
 	if batches > 1 {
 		fmt.Fprintf(a.out, "\n  %d문항을 %d번 나눠 받습니다. 한 번에 몇 분씩 걸립니다.\n"+
-			"  계속하려면 Enter, 그만두려면 :q >> ", count, batches)
+			"  계속하려면 Enter, 그만두려면 :q >> ", total, batches)
 		line, eof, err := ui.ReadLine(a.in)
 		if err != nil {
 			return err
@@ -1046,7 +1082,7 @@ func (a *app) fetchPack() error {
 	// 프로세스는 사전을 하나만 열 수 있어서(analyzerFor 참고), 문제마다
 	// 방향이 바뀌면 그때마다 사전을 다시 읽어야 한다 — 실기에서 16.5초와
 	// 39초다. 받는 일만 한 번에 끝내고, 푸는 것은 방향별로 한다.
-	done, batch := 0, 0
+	done := 0
 	for i, dir := range dirs {
 		want := share(count, len(dirs), i)
 
@@ -1054,56 +1090,66 @@ func (a *app) fetchPack() error {
 		//
 		// 나눠 부르는 것은 응답 한도 때문이지 사용자가 나눠 받고 싶어서가
 		// 아니다. 자료실에 열두 줄이 생기면 어디까지 풀었는지도 열두 군데로
-		// 갈린다. 묶음마다 지금까지 받은 것을 통째로 다시 쓰므로, 도중에
-		// 실패해도 앞서 받은 것은 그 파일에 남는다.
-		var all []pack.Problem
+		// 갈린다.
 		path := ""
+		taken := map[string]bool{}
+		have := 0
 		if cand, ok := into[dir]; ok {
-			// 이미 받아 둔 것을 함께 넘긴다. 묶음마다 파일을 통째로 다시
-			// 쓰므로, 앞서 있던 문항도 같이 있어야 사라지지 않는다.
-			all = append(all, cand.problems...)
 			path = cand.source
-			room := gen.MaxPack - len(all)
-			if want > room {
+			have = len(cand.problems)
+			for _, pr := range cand.problems {
+				taken[pr.ID] = true
+			}
+			if room := gen.MaxPack - have; want > room {
 				a.notice(fmt.Sprintf("%s 팩에는 %d개만 더 담을 수 있습니다. 그만큼만 받습니다.",
 					cand.key, room))
 				want = room
 			}
 		}
 
-		for want > 0 {
+		rounds := batchCount(want)
+		for round := 1; round <= rounds; round++ {
 			n := want
 			if n > gen.MaxCount {
 				n = gen.MaxCount
 			}
-			batch++
 			spec := gen.Spec{
 				Dir:   dir,
 				Level: level,
 				Topic: strings.TrimSpace(topic),
 				Count: n,
-				Round: batch,
+				Round: round,
 			}
 			a.notice(fmt.Sprintf("[%d/%d] %s %d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...",
-				batch, batches, dirLabel(dir), n))
+				round, rounds, dirLabel(dir), n))
 
 			ps, bad, err := gen.Generate(context.Background(), client, spec)
 			if err != nil {
-				// 앞서 받은 것은 이미 파일로 남아 있다. 여기서 멈추되
+				// 앞서 받은 것은 이미 파일에 덧붙여져 있다. 여기서 멈추되
 				// 무엇까지 받았는지 알린다.
 				if done > 0 {
 					a.notice(fmt.Sprintf("여기까지 %d문항을 받아 두었습니다. 나머지는 8번으로 다시 받으세요.", done))
 				}
 				return err
 			}
-			all = append(all, ps...)
-			path, err = gen.WritePackAt(path, filepath.Join(a.dataDir, "packs"), spec, all, time.Now())
-			if err != nil {
-				return err
+
+			// 파일 이름을 먼저 정하고 ID를 한 번만 확정한다. 쓸 때마다
+			// 계산하면 같은 팩을 다시 쓸 때 ID가 바뀌고, 그러면 그 문제로
+			// 낸 답안이 문제를 잃는다.
+			if path == "" {
+				path, err = gen.NewPackPath(filepath.Join(a.dataDir, "packs"), spec, time.Now())
+				if err != nil {
+					return err
+				}
 			}
-			done += len(ps)
+			named := gen.NameProblems(path, taken, ps)
+			if err := gen.AppendPack(path, named); err != nil {
+				return a.rescue(named, err)
+			}
+			done += len(named)
+			have += len(named)
 			msg := fmt.Sprintf("[%d/%d] %d문항 (%s) — %s에 %d문항",
-				batch, batches, len(ps), lengthSummary(ps), filepath.Base(path), len(all))
+				round, rounds, len(named), lengthSummary(named), filepath.Base(path), have)
 			if len(bad) > 0 {
 				// 요청한 수보다 적게 받았으면 왜 그런지 알려야 한다. 모르면
 				// 같은 금액을 또 쓰면서 같은 일이 반복된다.
@@ -1113,10 +1159,21 @@ func (a *app) fetchPack() error {
 			want -= n
 		}
 	}
-	if batches > 1 {
-		a.notice(fmt.Sprintf("모두 %d문항을 받았습니다.", done))
-	}
+	a.notice(fmt.Sprintf("모두 %d문항을 받았습니다.", done))
 	return nil
+}
+
+// rescue는 팩에 쓰지 못한 문항을 따로 남긴다.
+//
+// 이미 값을 치른 결과다. 그냥 오류만 올리면 그 돈은 사라진다. packs/ 밖에
+// 두는 것은 반쯤 든 파일이 자료실에 섞이지 않게 하기 위해서다.
+func (a *app) rescue(ps []pack.Problem, cause error) error {
+	path := filepath.Join(a.dataDir, fmt.Sprintf("rescue-%s.jsonl", time.Now().Format("20060102-150405")))
+	if err := gen.AppendPack(path, ps); err != nil {
+		return fmt.Errorf("팩을 쓰지 못했고 따로 남기지도 못했습니다: %w (원인: %v)", err, cause)
+	}
+	return fmt.Errorf("팩을 쓰지 못해 %d문항을 %s에 남겼습니다. 값은 이미 치렀으니 그 파일을 "+
+		"packs/ 로 옮기면 쓸 수 있습니다: %w", len(ps), filepath.Base(path), cause)
 }
 
 // extendable은 이어 받을 만한 팩을 고른다.
@@ -1125,6 +1182,7 @@ func (a *app) fetchPack() error {
 // 않는다 — 주제를 바꿔 가며 한 팩을 키우는 것이 오히려 흔하다.
 func extendable(sets []packSet, dir pack.Direction, level string) (packSet, bool) {
 	var best packSet
+	var newest time.Time
 	found := false
 	for _, s := range sets {
 		if s.dir != dir || len(s.problems) >= gen.MaxPack {
@@ -1133,9 +1191,34 @@ func extendable(sets []packSet, dir pack.Direction, level string) (packSet, bool
 		if lv := s.levels(); len(lv) != 1 || lv[0] != level {
 			continue
 		}
-		best, found = s, true
+		// 레벨이 비어 있는 문항이 섞여 있으면 고르지 않는다. levels()는 빈
+		// 값을 건너뛰므로 그런 팩도 「단일 레벨」로 보인다.
+		blank := false
+		for _, pr := range s.problems {
+			if pr.Level == "" {
+				blank = true
+				break
+			}
+		}
+		if blank {
+			continue
+		}
+		// 가장 최근에 손댄 팩을 고른다. 파일명 순으로 고르면 시작 팩이
+		// 오늘 받은 팩보다 뒤에 와서(s > k) 엉뚱한 팩을 제안한다.
+		at := modTime(s.source)
+		if !found || at.After(newest) {
+			best, newest, found = s, at, true
+		}
 	}
 	return best, found
+}
+
+func modTime(path string) time.Time {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
 }
 
 // batchCount는 n문항을 받으려면 몇 번 불러야 하는지다.
@@ -1306,8 +1389,21 @@ func (a *app) status(sets []packSet) (ui.Status, error) {
 		return ui.Status{}, err
 	}
 
+	solved, err := a.solvedByProblem()
+	if err != nil {
+		return ui.Status{}, err
+	}
+	start := ""
+	if set, _, ok := nextUnsolved(sets, solved); ok {
+		start = set.key
+	} else if len(sets) > 0 {
+		start = sets[0].key
+	}
+
 	return ui.Status{
 		Total:    total,
+		Packs:    len(sets),
+		StartKey: start,
 		QueueLen: len(queue),
 		Feedback: len(feedback),
 		Due:      len(progress.Due(cards)),
