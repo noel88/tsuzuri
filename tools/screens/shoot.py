@@ -11,8 +11,8 @@
     TSUZURI_FONT_MAIN  라틴·한글·기호  (기본: D2Coding)
     TSUZURI_FONT_JA    가나·한자       (기본: 히라기노 각고딕)
 
-실기 사진이 아니다. fbterm의 실제 폰트와 칸 수는 M0에서 확인해야 하므로,
-여기서는 102x25칸(칸 하나 10x24px, 글꼴 20px)으로 가정한다.
+실기 사진이 아니다. 다만 칸 수는 실기에서 잰 값이다(2026-09-17, stty 36 128).
+포메라 fbterm은 1024x600 화면에 128x36칸, 즉 8x16 픽셀 글꼴을 쓴다.
 """
 
 import fcntl
@@ -29,13 +29,15 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+# 실기 실측: stty 36 128 → 1024x600 화면에 128x36칸, 8x16 글꼴.
+#
 # 칸 너비는 글꼴 크기의 절반이어야 한다. 고정폭 CJK 글꼴은 라틴이 0.5em,
 # 한글·가나·한자가 1em이라, 그래야 전각 문자가 칸 두 개를 빈틈 없이 채운다.
-# 줄 높이는 글꼴 크기의 1.2배로 둔다.
-COLS, ROWS = 102, 25
-CELL_W, CELL_H = 10, 24
+COLS, ROWS = 128, 36
+CELL_W, CELL_H = 8, 16
 SCREEN_W, SCREEN_H = 1024, 600
-SCALE = 2  # 레티나에서도 선명하게. 결과물은 2048x1200.
+SCALE = 3  # 8x16 글꼴은 작아서 3배로 키운다.
+MARGIN = 8  # 위아래 여백(픽셀, 1배 기준)
 
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "docs" / "screenshots"
@@ -240,15 +242,30 @@ def draw_box(d, ch, x, y, cw, chh, fg, lw):
 
 
 def render(page, path, theme):
+    """한 화면을 그린다.
+
+    실기 화면은 128x36칸인데 한 화면의 내용은 20줄 남짓이라 아래가 빈다.
+    실제 터미널에서는 그 자리에 이전 화면의 끝부분이 남아 있지만, 캡처는
+    화면 단위로 잘라 담으므로 빈 줄을 걷어내고 쓴 만큼만 그린다.
+    """
     s = SCALE
     cw, chh = CELL_W * s, CELL_H * s
-    img = Image.new("RGB", (SCREEN_W * s, SCREEN_H * s), theme["bg"])
+
+    used = len(page)
+    while used > 0 and page[used - 1].strip() == "":
+        used -= 1
+    used += 1  # 프롬프트 아래 한 줄은 커서 자리로 남긴다
+    if used > ROWS:
+        used = ROWS
+
+    height = used * chh + 2 * MARGIN * s
+    img = Image.new("RGB", (SCREEN_W * s, height), theme["bg"])
     d = ImageDraw.Draw(img)
     size = 2 * cw  # 1em = 칸 두 개
     main = ImageFont.truetype(FONT_MAIN, size)
     ja = ImageFont.truetype(FONT_JA, size)
     ox = (SCREEN_W * s - COLS * cw) // 2
-    oy = (SCREEN_H * s - ROWS * chh) // 2
+    oy = MARGIN * s
     asc, desc = main.getmetrics()
     base_off = (chh - (asc + desc)) // 2 + asc
     lw = max(1, round(s * 1.2))
