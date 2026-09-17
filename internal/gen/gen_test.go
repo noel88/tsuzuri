@@ -238,3 +238,43 @@ func TestWritePackSurvivesAwkwardLevelNames(t *testing.T) {
 		}
 	}
 }
+
+// 모델이 "원인·이유의 て형 접속(忙しくて)"처럼 설명문을 넣으면 채점기가
+// 답안에서 찾지 못해, 모범답안을 그대로 써도 전부 "빠짐"으로 뜬다.
+// 실제 API 응답에서 이 일이 일어났다.
+func TestGenerateDropsKeyPointsNotInReference(t *testing.T) {
+	reply := `{"problems":[{"id":"x1","dir":"ko2ja","level":"N3","topic":"일상",
+	  "prompt":"요즘 일이 바빠서 기력이 없어요.",
+	  "reference":"最近仕事が忙しくて、気力がありません。",
+	  "key_points":["忙しくて","원인·이유의 て형 접속(忙しくて)","気力","何も+부정 호응"],
+	  "traps":[],"style":"polite"}]}`
+	f := &llm.FakeClient{Reply: reply}
+
+	got, err := Generate(context.Background(), f, spec())
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("문항 = %d", len(got))
+	}
+	want := []string{"忙しくて", "気力"}
+	if len(got[0].KeyPoints) != len(want) {
+		t.Fatalf("핵심 표현 = %v, 기대 %v (설명문은 걸러야 한다)", got[0].KeyPoints, want)
+	}
+	for i := range want {
+		if got[0].KeyPoints[i] != want[i] {
+			t.Errorf("핵심 표현 = %v, 기대 %v", got[0].KeyPoints, want)
+			break
+		}
+	}
+}
+
+func TestGeneratePromptDemandsLiteralKeyPoints(t *testing.T) {
+	f := &llm.FakeClient{Reply: goodReply}
+	if _, err := Generate(context.Background(), f, spec()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.Got.System, "글자 그대로") {
+		t.Errorf("핵심 표현이 reference에 그대로 있어야 함을 명시해야 한다:\n%s", f.Got.System)
+	}
+}
