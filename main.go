@@ -984,6 +984,28 @@ func (a *app) fetchPack() error {
 	if n, err := strconv.Atoi(strings.TrimSpace(sizeLine)); err == nil && n > 0 {
 		count = n
 	}
+	// 많이 요청하면 여러 번 나눠 부른다.
+	//
+	// 한 번에 다 만들 수는 없다 — 장문이 섞이면 한 문항이 길어서 응답
+	// 한도를 넘기고, 넘기면 몇 분을 기다린 끝에 끊긴 채 그동안 쓴 토큰만
+	// 청구된다. 실기에서 300문항을 한 번에 요청했다가 그렇게 잃었다.
+	//
+	// 묶음마다 팩 파일을 따로 쓴다. 도중에 실패해도 앞서 받은 것은 남는다.
+	batches := 0
+	for i := range dirs {
+		batches += batchCount(share(count, len(dirs), i))
+	}
+	if batches > 1 {
+		fmt.Fprintf(a.out, "\n  %d문항을 %d번 나눠 받습니다. 한 번에 몇 분씩 걸립니다.\n"+
+			"  계속하려면 Enter, 그만두려면 :q >> ", count, batches)
+		line, eof, err := ui.ReadLine(a.in)
+		if err != nil {
+			return err
+		}
+		if ui.IsCancel(line) || eof {
+			return a.cancelFetch()
+		}
+	}
 
 	// 방향을 둘 다 고르면 팩도 둘로 만든다.
 	//
@@ -991,36 +1013,62 @@ func (a *app) fetchPack() error {
 	// 프로세스는 사전을 하나만 열 수 있어서(analyzerFor 참고), 문제마다
 	// 방향이 바뀌면 그때마다 사전을 다시 읽어야 한다 — 실기에서 16.5초와
 	// 39초다. 받는 일만 한 번에 끝내고, 푸는 것은 방향별로 한다.
+	done, batch := 0, 0
 	for i, dir := range dirs {
-		spec := gen.Spec{
-			Dir:   dir,
-			Level: level,
-			Topic: strings.TrimSpace(topic),
-			Count: share(count, len(dirs), i),
-		}
-		a.notice(fmt.Sprintf("%s %d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...",
-			dirLabel(dir), spec.Count))
+		want := share(count, len(dirs), i)
+		for want > 0 {
+			n := want
+			if n > gen.MaxCount {
+				n = gen.MaxCount
+			}
+			batch++
+			spec := gen.Spec{
+				Dir:   dir,
+				Level: level,
+				Topic: strings.TrimSpace(topic),
+				Count: n,
+				Round: batch,
+			}
+			a.notice(fmt.Sprintf("[%d/%d] %s %d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...",
+				batch, batches, dirLabel(dir), n))
 
-		ps, bad, err := gen.Generate(context.Background(), client, spec)
-		if err != nil {
-			// 앞의 방향이 이미 저장됐으면 그것은 남는다. 두 번째가 실패했다고
-			// 첫 번째까지 버리면 그 호출은 이미 과금된 뒤다.
-			return err
+			ps, bad, err := gen.Generate(context.Background(), client, spec)
+			if err != nil {
+				// 앞서 받은 팩은 이미 파일로 남아 있다. 여기서 멈추되
+				// 무엇까지 받았는지 알린다.
+				if done > 0 {
+					a.notice(fmt.Sprintf("여기까지 %d문항을 받아 두었습니다. 나머지는 8번으로 다시 받으세요.", done))
+				}
+				return err
+			}
+			path, err := gen.WritePack(filepath.Join(a.dataDir, "packs"), spec, ps, time.Now())
+			if err != nil {
+				return err
+			}
+			done += len(ps)
+			msg := fmt.Sprintf("[%d/%d] %d문항을 받았습니다 (%s): %s",
+				batch, batches, len(ps), lengthSummary(ps), filepath.Base(path))
+			if len(bad) > 0 {
+				// 요청한 수보다 적게 받았으면 왜 그런지 알려야 한다. 모르면
+				// 같은 금액을 또 쓰면서 같은 일이 반복된다.
+				msg += fmt.Sprintf("\n  %d개는 버리거나 고쳤습니다: %s", len(bad), strings.Join(bad, ", "))
+			}
+			a.notice(msg)
+			want -= n
 		}
-		path, err := gen.WritePack(filepath.Join(a.dataDir, "packs"), spec, ps, time.Now())
-		if err != nil {
-			return err
-		}
-		msg := fmt.Sprintf("%d문항을 받았습니다 (%s): %s",
-			len(ps), lengthSummary(ps), filepath.Base(path))
-		if len(bad) > 0 {
-			// 요청한 수보다 적게 받았으면 왜 그런지 알려야 한다. 모르면
-			// 같은 금액을 또 쓰면서 같은 일이 반복된다.
-			msg += fmt.Sprintf("\n  %d개는 버리거나 고쳤습니다: %s", len(bad), strings.Join(bad, ", "))
-		}
-		a.notice(msg)
+	}
+	if batches > 1 {
+		a.notice(fmt.Sprintf("모두 %d문항을 받았습니다.", done))
 	}
 	return nil
+}
+
+// batchCount는 n문항을 받으려면 몇 번 불러야 하는지다.
+func batchCount(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return (n + gen.MaxCount - 1) / gen.MaxCount
 }
 
 // lengthSummary는 받은 팩의 길이 배분을 알린다.

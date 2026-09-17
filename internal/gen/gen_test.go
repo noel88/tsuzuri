@@ -303,3 +303,22 @@ func TestLengthMixSplitsEvenly(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateRefusesTooManyProblems(t *testing.T) {
+	// 넘겨서 부르면 몇 분을 기다린 끝에 끊기고, 그동안 쓴 토큰은 그대로
+	// 청구된다. 실기에서 300문항을 요청했다가 그렇게 잃었다.
+	f := &llm.FakeClient{Reply: `{"problems":[]}`}
+	s := spec()
+	s.Count = 300
+
+	_, _, err := Generate(context.Background(), f, s)
+	if err == nil {
+		t.Fatal("한도를 넘긴 요청을 그대로 보냈다")
+	}
+	if f.Calls != 0 {
+		t.Errorf("API를 %d번 불렀다 — 부르기 전에 막아야 한다", f.Calls)
+	}
+	if !strings.Contains(err.Error(), "나눠 받으세요") {
+		t.Errorf("어떻게 하라는 말이 없다: %v", err)
+	}
+}
