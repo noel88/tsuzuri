@@ -54,15 +54,36 @@ if [ ! -x ./tsuzuri ]; then
 	exit 1
 fi
 ls -lh ./tsuzuri | awk '{print "  바이너리 크기:", $5}'
+
+# 팩이 없으면 앱은 사전을 읽기도 전에 끝난다. 그 상태로 시간을 재면
+# 0.04초 같은 값이 나와 측정에 성공한 것처럼 보인다.
+if [ ! -d packs ] || [ -z "$(ls packs/*.jsonl 2>/dev/null)" ]; then
+	echo
+	echo "  packs/ 에 팩이 없어 사전 로딩을 잴 수 없습니다."
+	echo "  저장소의 deploy/packs/ 를 이 디렉터리 아래로 복사한 뒤 다시 실행하세요."
+	echo "  (사전은 팩을 골라 드릴에 들어갈 때 비로소 읽힙니다)"
+	exit 1
+fi
+
+# 먼저 한 번 돌려 출력을 보여준다. "사전을 읽는 중입니다"가 보여야
+# 뒤의 시간이 의미가 있다.
+for key in 41 42; do
+	echo
+	echo "  [$key] 실행 결과 (앞부분):"
+	printf '%s\nx\n' "$key" | ./tsuzuri 2>&1 | grep -E '사전을 읽는 중|그런 번호|오류|건너뜁' | head -3 | sed 's/^/    /'
+	echo "  [$key] 걸린 시간:"
+	{ time -p sh -c "printf '$key\nx\n' | ./tsuzuri >/dev/null 2>&1" ; } 2>&1 | sed 's/^/    /'
+done
+
 echo
-echo "  ko2ja(일본어 사전, 맥 기준 88MB) 로딩을 잽니다..."
-echo "  메뉴가 뜨면 41 입력 → 사전 로딩 후 문제가 뜨면 x 로 종료하세요."
-echo
-time sh -c 'printf "41\nx\n" | ./tsuzuri' >/dev/null 2>&1
-echo
-echo "  ja2ko(한국어 사전, 맥 기준 211MB) 로딩을 잽니다..."
-echo "  ja2ko 팩이 있어야 합니다. 없으면 건너뜁니다."
-time sh -c 'printf "42\nx\n" | ./tsuzuri' >/dev/null 2>&1
+echo "  최대 메모리 (가능하면):"
+if [ -x /usr/bin/time ]; then
+	/usr/bin/time -v sh -c 'printf "41\nx\n" | ./tsuzuri >/dev/null 2>&1' 2>&1 |
+		grep -i 'maximum resident' | sed 's/^/    /' ||
+		echo "    /usr/bin/time -v 를 지원하지 않습니다"
+else
+	echo "    /usr/bin/time 이 없습니다. 앱 실행 중 다른 창에서 free -m 을 보세요."
+fi
 echo
 
 echo "--- R2: 한글 입력 (손으로 확인) ---"
