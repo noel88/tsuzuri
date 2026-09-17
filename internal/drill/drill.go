@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/noel88/tsuzuri/internal/analyze"
 	"github.com/noel88/tsuzuri/internal/pack"
@@ -51,6 +52,9 @@ type Session struct {
 	Keys *os.File
 
 	keys *ui.KeyReader
+
+	// warn은 다음 출제 화면 위에 한 번 띄울 알림이다.
+	warn string
 }
 
 // Run은 문제를 순서대로 출제하고 답안과 분석 결과를 저장한다.
@@ -261,6 +265,10 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 	for {
 		page, _ := ui.Scroll(ui.RenderProblem(p, st, s.TermW, -1), s.rows(), 0)
 		ui.Clear(s.Out)
+		if s.warn != "" {
+			fmt.Fprintf(s.Out, "  %s\n\n", s.warn)
+			s.warn = ""
+		}
 		fmt.Fprint(s.Out, page)
 
 		line, eof, err := ui.ReadLine(s.In)
@@ -292,6 +300,20 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 			if err != nil || strings.TrimSpace(text) != "" {
 				return text, ui.CmdStay, eof, err
 			}
+			continue
+		}
+		// 입력기가 글자를 중간에서 자른 답안을 저장하지 않는다.
+		//
+		// 조합 중에 Enter가 들어가면 마지막 글자의 바이트 일부만 온다.
+		// 설정 파일에서 먼저 겪었고, 실기에서 일본어 답안에도 났다 —
+		// 「休」 뒤에 깨진 바이트가 붙은 답안이 저장되고 첨삭까지 나가서,
+		// 모델이 「표기가 무너져 일본어로 성립하지 않는다」고 답했다.
+		// 값을 치르고 받은 지적이 자기 오타에 대한 것이면 아무 쓸모가 없다.
+		if line != "" && !utf8.ValidString(line) {
+			// 입력을 더 받지 않는다. 여기서 한 줄을 읽으면 사용자가 이어서
+			// 다시 친 답안이 그 자리에 먹힌다.
+			s.warn = "입력한 글자가 깨졌습니다. 한글·일본어를 조합하던 중에 Enter를 누르면 " +
+				"마지막 글자가 잘립니다 — 글자가 다 확정된 뒤에 다시 쳐 주세요."
 			continue
 		}
 		// 팩 받기 프롬프트에서 쓰는 :q도 여기서 받는다. 받지 않으면

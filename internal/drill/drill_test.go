@@ -266,3 +266,29 @@ func TestRunRecordsReviewMark(t *testing.T) {
 		t.Errorf("복습 표시가 안 남았다: %+v", marks)
 	}
 }
+
+func TestRunRejectsBrokenUTF8Answer(t *testing.T) {
+	// 입력기가 조합 중인 글자를 자르면 바이트 일부만 온다. 실기에서
+	// 「休」 뒤에 깨진 바이트가 붙은 답안이 저장되고 첨삭까지 나갔다 —
+	// 값을 치르고 받은 지적이 자기 오타에 대한 것이면 쓸모가 없다.
+	dir := t.TempDir()
+	s, out := newSession(t, dir, "休\xe3\x81ない\n昨日カフェに行った。\nx\n")
+
+	if _, err := s.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	attempts, err := store.ReadAll[store.Attempt](filepath.Join(dir, "attempts.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("답안 %d건, 기대 1건 — 깨진 답안이 저장됐다", len(attempts))
+	}
+	if attempts[0].Answer != "昨日カフェに行った。" {
+		t.Errorf("저장된 답안 = %q", attempts[0].Answer)
+	}
+	if !strings.Contains(out.String(), "글자가 깨졌습니다") {
+		t.Error("깨졌다고 알리지 않았다")
+	}
+}
