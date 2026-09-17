@@ -36,6 +36,21 @@ var AnswerActions = []Action{
 	{CmdQuit, "X", "종료"},
 }
 
+// ActionByKey는 눌린 글자에 해당하는 선택지를 찾는다.
+//
+// 그 줄에 없는 글자는 받지 않는다. 예전에는 아무 글자나 ParseCommand로
+// 넘겼는데, 답안 화면의 고르기 줄에서 b를 누르면 그 줄에 없는 「복습에
+// 넣기」가 돌아왔고 표시도 안 남긴 채 문제만 조용히 넘어갔다.
+func ActionByKey(as []Action, r rune) (Command, bool) {
+	k := strings.ToUpper(string(r))
+	for _, a := range as {
+		if a.Key != "" && strings.ToUpper(a.Key) == k {
+			return a.Cmd, true
+		}
+	}
+	return CmdStay, false
+}
+
 // ActionAt은 고른 자리의 명령을 돌려준다.
 func ActionAt(as []Action, sel int) Command {
 	if sel < 0 || sel >= len(as) {

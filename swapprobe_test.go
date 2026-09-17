@@ -24,7 +24,7 @@ func TestOnlyOneDictionaryPerProcess(t *testing.T) {
 	a := newApp()
 	a.out = discard{}
 
-	if _, err := a.analyzerFor(pack.KoToJa); err != nil {
+	if _, err := a.analyzerFor(pack.KoToJa, "41"); err != nil {
 		t.Fatal(err)
 	}
 	afterJa := liveMB()

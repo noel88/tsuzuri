@@ -251,3 +251,29 @@ func TestLastPack(t *testing.T) {
 		t.Error("푼 것이 없으면 이어할 곳도 없다")
 	}
 }
+
+func TestCardsStopWaitingForFeedbackThatNeverComes(t *testing.T) {
+	// 첨삭이 영영 오지 않는 일이 있다 — sync가 영구 실패로 판정해 큐에서
+	// 빼거나 답안을 못 찾아 버리면 그렇다. 그대로 두면 그 문제는 복습
+	// 드릴에 다시는 안 나오는데, 사용자는 왜 안 나오는지 알 수 없다.
+	attempts := []store.Attempt{
+		attempt("a1", "p1", at(0)),
+		attempt("a2", "p1", at(1)), // 첨삭이 오지 않는다
+	}
+	feedback := []tsync.Feedback{graded("a1", true)}
+
+	// 한도 안에서는 기다린다.
+	if c := find(t, Cards(attempts, feedback, nil, at(5)), "p1"); c.State != StateWaiting {
+		t.Errorf("state = %v, 아직 기다려야 한다", c.State)
+	}
+
+	// 한도가 지나면 다시 낸다.
+	late := at(1).Add(pendingTTL + time.Hour)
+	cards := Cards(attempts, feedback, nil, late)
+	if c := find(t, cards, "p1"); c.State != StateDue {
+		t.Errorf("state = %v, 다시 낼 차례여야 한다", c.State)
+	}
+	if got := Due(cards); len(got) != 1 {
+		t.Errorf("Due = %v, 다시 나와야 한다", got)
+	}
+}
