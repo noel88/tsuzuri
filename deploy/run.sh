@@ -8,9 +8,7 @@
 #
 # 키를 처음 넣을 때(기기에서 직접, 한 번만):
 #
-#   mkdir -p ~/.config/tsuzuri
-#   cat > ~/.config/tsuzuri/key      # 키를 붙여넣고 Ctrl+D
-#   chmod 600 ~/.config/tsuzuri/key
+#   sh set-key.sh
 
 set -e
 
@@ -25,7 +23,7 @@ fi
 
 if [ -z "$ANTHROPIC_API_KEY" ]; then
 	echo "API 키가 없습니다. 온라인 기능(5·6번)은 쓸 수 없습니다."
-	echo "넣으려면: mkdir -p ~/.config/tsuzuri && cat > ~/.config/tsuzuri/key"
+	echo "넣으려면: sh set-key.sh"
 	echo
 fi
 

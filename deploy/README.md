@@ -9,6 +9,7 @@
 |---|---|---|
 | `tsuzuri` | **필수** | armv7 정적 바이너리 (46MB) |
 | `run.sh` | 권장 | 키를 환경변수로 넘겨 실행한다 |
+| `set-key.sh` | 권장 | API 키를 화면에 안 보이게 입력받아 저장한다 |
 | `packs/*.jsonl` | 권장 | 시작 팩 10문항(양방향 5개씩)이 들어 있다 |
 | `config.toml` | 선택 | 없으면 기본값. 키는 `run.sh` 쪽을 권한다 |
 | `m0-check.sh` | 검증용 | 실기 확인 스크립트 |
@@ -56,10 +57,16 @@ scp testdata/packs/*.jsonl <포메라>:~/tsuzuri/packs/
 없고, 카드를 잃으면 키가 그대로 노출된다. 기기에서 한 번만 하면 된다.
 
 ```sh
-mkdir -p ~/.config/tsuzuri
-cat > ~/.config/tsuzuri/key      # 키를 붙여넣고 Ctrl+D
-chmod 600 ~/.config/tsuzuri/key
+sh set-key.sh
 ```
+
+입력하는 동안 키가 화면에 보이지 않고, 저장한 뒤에도 앞 10자만 보여준다.
+`sk-ant-`로 시작하지 않으면 저장하지 않는다. 파일은 `~/.config/tsuzuri/key`에
+권한 0600으로 저장된다.
+
+키를 **명령줄 인자로 주지 않는 것**이 중요하다. 인자로 주면 셸 기록과 프로세스
+목록에 그대로 남는다. 이 스크립트가 인자를 받지 않는 이유다.
+(다른 경로에 저장하려면 `sh set-key.sh /경로/key`)
 
 `run.sh`가 이 파일을 읽어 `ANTHROPIC_API_KEY`로 넘긴다. 키가 없으면 안내만
 띄우고 오프라인 기능은 그대로 쓸 수 있다.
@@ -70,7 +77,7 @@ chmod 600 ~/.config/tsuzuri/key
 
 ```bash
 cd <tsuzuri 디렉터리>
-chmod +x tsuzuri run.sh m0-check.sh
+chmod +x tsuzuri run.sh set-key.sh m0-check.sh
 sh run.sh
 ```
 
