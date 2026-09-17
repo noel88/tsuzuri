@@ -21,13 +21,15 @@ if [ -t 0 ] && command -v stty >/dev/null 2>&1; then
 	saved=$(stty -g)
 	trap 'stty "$saved" 2>/dev/null; echo' EXIT INT TERM
 	stty -echo
-	read -r key
+	# 개행 없이 끝나는 입력(붙여넣기)도 받아야 하므로 실패를 무시한다.
+	read -r key || true
 	stty "$saved"
 	trap - EXIT INT TERM
 	echo
 else
-	# 터미널이 아니면(파이프 등) 에코를 끌 수 없다. 그대로 읽는다.
-	read -r key
+	# 터미널이 아니면(파이프 등) 에코를 끌 필요가 없다.
+	# pbpaste처럼 개행 없이 끝나는 입력도 받아야 하므로 실패를 무시한다.
+	read -r key || true
 fi
 
 # 앞뒤 공백과 개행을 떼어낸다. 붙여넣기에는 잘 섞인다.
