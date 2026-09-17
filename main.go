@@ -649,26 +649,72 @@ func (a *app) review(sets []packSet) (bool, error) {
 	}
 
 	for i, it := range list {
-		f, at, p := it.f, it.at, it.p
 		st := ui.Status{Index: i + 1, Total: len(list), Online: a.online}
-		ui.Clear(a.out)
-		fmt.Fprint(a.out, ui.RenderFeedback(p, at, f, st, a.termW))
-
-		line, eof, err := ui.ReadLine(a.in)
+		quit, back, err := a.showFeedback(it.p, it.at, it.f, st)
 		if err != nil {
 			return false, err
 		}
-		switch ui.ParseCommand(line) {
-		case ui.CmdQuit:
+		if quit {
 			return true, nil
-		case ui.CmdMenu:
-			return false, nil
 		}
-		if eof {
-			return true, nil
+		if back {
+			return false, nil
 		}
 	}
 	return false, nil
+}
+
+// showFeedback은 첨삭 하나를 보여준다. 길면 위아래로 넘길 수 있다.
+//
+// 첨삭은 이제 까닭까지 담아 길다. 한 화면에 안 들어가는 것을 그냥 그리면
+// 위쪽이 스크롤로 밀려 올라가 무엇이 틀렸는지를 못 읽는다.
+func (a *app) showFeedback(p pack.Problem, at store.Attempt, f tsync.Feedback, st ui.Status) (quit, back bool, err error) {
+	offset := 0
+	for {
+		page, max := ui.Scroll(ui.RenderFeedback(p, at, f, st, a.termW), ui.TermHeight(), offset)
+		ui.Clear(a.out)
+		fmt.Fprint(a.out, page)
+
+		if a.keys == nil {
+			line, eof, err := ui.ReadLine(a.in)
+			if err != nil {
+				return false, false, err
+			}
+			switch ui.ParseCommand(line) {
+			case ui.CmdQuit:
+				return true, false, nil
+			case ui.CmdMenu:
+				return false, true, nil
+			}
+			return eof, false, nil
+		}
+
+		k, err := a.keys.Read()
+		if err != nil {
+			return true, false, nil
+		}
+		switch k.Key {
+		case ui.KeyQuit:
+			return true, false, nil
+		case ui.KeyEnter, ui.KeyRight:
+			return false, false, nil
+		case ui.KeyUp:
+			if offset > 0 {
+				offset--
+			}
+		case ui.KeyDown:
+			if offset < max {
+				offset++
+			}
+		case ui.KeyRune:
+			switch ui.ParseCommand(string(k.Rune)) {
+			case ui.CmdQuit:
+				return true, false, nil
+			case ui.CmdMenu:
+				return false, true, nil
+			}
+		}
+	}
 }
 
 func (a *app) export() error {
@@ -855,10 +901,10 @@ func (a *app) fetchPack() error {
 func lengthSummary(ps []pack.Problem) string {
 	n := map[string]int{}
 	for _, p := range ps {
-		n[gen.LengthOf(p.Prompt)]++
+		n[pack.LengthOf(p.Prompt)]++
 	}
 	var parts []string
-	for _, k := range []string{"단문", "중문", "장문"} {
+	for _, k := range []string{pack.LenShort, pack.LenMedium, pack.LenLong} {
 		if n[k] > 0 {
 			parts = append(parts, fmt.Sprintf("%s %d", k, n[k]))
 		}

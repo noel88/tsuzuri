@@ -41,6 +41,9 @@ type Session struct {
 	// Start는 몇 번째 문제부터 낼지다 (0부터). 이어하기에 쓴다.
 	Start int
 
+	// Rows는 화면이 몇 줄인지다. 0이면 터미널에 물어본다.
+	Rows int
+
 	// Keys는 키를 하나씩 읽을 입력이다. 비면 예전처럼 한 줄씩 읽는다.
 	//
 	// In과 따로 두는 것은 raw mode가 파일 서술자에 거는 것이라서다.
@@ -181,9 +184,12 @@ func (s *Session) Run() (Outcome, error) {
 // 키를 하나씩 읽을 수 있으면 좌우 화살표로 고르고, 아니면 예전처럼 한 줄을
 // 읽는다. 파이프로 입력을 넣는 자리(캡처 도구, 스크립트)가 그 경로로 돈다.
 func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Analysis, st ui.Status) (ui.Command, bool, error) {
+	offset, max := 0, 0
 	draw := func(sel int) {
+		page, m := ui.Scroll(ui.RenderResult(p, answer, a, st, s.TermW, sel), s.rows(), offset)
+		max = m
 		ui.Clear(s.Out)
-		fmt.Fprint(s.Out, ui.RenderResult(p, answer, a, st, s.TermW, sel))
+		fmt.Fprint(s.Out, page)
 	}
 
 	if s.keys == nil {
@@ -214,6 +220,15 @@ func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Ana
 			return ui.ActionAt(ui.ResultActions, sel), false, nil
 		case ui.KeyLeft, ui.KeyRight:
 			sel = ui.MoveAction(sel, k.Key, len(ui.ResultActions))
+		case ui.KeyUp:
+			// 문단 하나를 번역한 답안은 한 화면에 안 들어간다.
+			if offset > 0 {
+				offset--
+			}
+		case ui.KeyDown:
+			if offset < max {
+				offset++
+			}
 		case ui.KeyRune:
 			// 글자 키도 그대로 받는다. 입력기가 켜져 있으면 글자가
 			// 조합으로 먹히는데, 그때는 화살표가 대신한다.
@@ -228,6 +243,14 @@ func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Ana
 	}
 }
 
+// rows는 화면 높이다.
+func (s *Session) rows() int {
+	if s.Rows > 0 {
+		return s.Rows
+	}
+	return ui.TermHeight()
+}
+
 // askAnswer는 답안을 받는다. 답 대신 다른 일을 고르면 그 명령을 돌려준다.
 //
 // 답을 치는 동안에는 키를 하나씩 받지 않는다. 그 화면은 터미널의 보통
@@ -236,10 +259,18 @@ func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Ana
 // 고르기 줄을 띄운다.
 func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, bool, error) {
 	for {
+		page, _ := ui.Scroll(ui.RenderProblem(p, st, s.TermW, -1), s.rows(), 0)
 		ui.Clear(s.Out)
-		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW, -1))
+		fmt.Fprint(s.Out, page)
 
 		line, eof, err := ui.ReadLine(s.In)
+		if err == nil && p.IsLong() && strings.TrimSpace(line) == "" && !eof {
+			// 문단 하나를 한 줄 입력으로 쓸 수는 없다. 긴 문항은 곧바로
+			// 편집기를 연다 — 여기서 고르기 줄을 띄우면 매번 「긴 답」을
+			// 골라야 하고, 그것 말고 고를 것도 없다.
+			text, err := ui.ReadFromEditor("", "")
+			return text, ui.CmdStay, false, err
+		}
 		if err != nil {
 			return "", ui.CmdStay, eof, err
 		}

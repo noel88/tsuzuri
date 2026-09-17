@@ -29,6 +29,7 @@ const (
 type Note struct {
 	Span  string `json:"span"`
 	Why   string `json:"why"`
+	Fix   string `json:"fix,omitempty"`
 	Level string `json:"level"`
 }
 
@@ -38,6 +39,7 @@ type Feedback struct {
 	At        time.Time `json:"at"`
 	Corrected string    `json:"corrected"`
 	Notes     []Note    `json:"notes"`
+	Good      []string  `json:"good,omitempty"`
 	Overall   string    `json:"overall"`
 }
 
@@ -54,9 +56,32 @@ const systemPrompt = `당신은 한국어 화자의 일본어·한국어 번역 
   - level "error": 문법·활용·어휘가 실제로 틀린 것
   - level "nuance": 틀리지는 않았지만 더 나은 선택이 있는 것
 - span은 문제가 되는 부분을 학습자의 답안에서 그대로 인용하세요.
-- overall은 두 문장 이내의 총평입니다. 점수를 매기지 마세요.
 - corrected는 학습자의 답안을 최소한으로 고친 것입니다.
-  참조 번역으로 갈아치우지 말고, 학습자가 쓴 표현을 살리세요.`
+  참조 번역으로 갈아치우지 말고, 학습자가 쓴 표현을 살리세요.
+
+**why는 자세히 쓰세요. 학습자가 다음에 스스로 고칠 수 있어야 합니다.**
+한 줄 판정으로 끝내지 말고 아래 셋을 담으세요.
+
+  1. 무엇이 틀렸는지 — 형태가 틀렸는지, 뜻이 어긋났는지, 문체가 안 맞는지.
+  2. 왜 그런지 — 그 자리에 걸리는 규칙. 「な형용사는 명사를 꾸밀 때 な가
+     붙는다」처럼 규칙을 이름으로 부르고, 이 문장에서 어떻게 적용되는지
+     한 문장으로 잇습니다.
+  3. 어떻게 고치는지 — fix에 고친 꼴만 짧게 넣으세요. 설명은 why에 씁니다.
+
+  좋음: "「静かくて」는 な형용사를 い형용사처럼 활용한 것입니다. 「静かだ」는
+    な형용사라 て형이 「静かで」가 됩니다. い형용사(「寒い」→「寒くて」)와
+    헷갈리기 쉬운 자리입니다."
+  나쁨: "「静かで」가 맞습니다."   ← 판정만 있고 근거가 없음
+
+- 한국어 화자가 자주 걸리는 자리라면 why에 그 사실을 적으세요. 예를 들어
+  한국어의 「-아서/어서」가 일본어에서 て형과 から로 갈리는 것처럼,
+  모국어의 간섭이 원인이면 그것을 짚는 편이 기억에 남습니다.
+- **맞은 것도 짚으세요.** good에 학습자가 잘 쓴 표현을 1~3개 넣습니다.
+  틀린 것만 돌려주면 무엇을 유지해야 할지 알 수 없습니다. 없으면 빈 배열.
+- overall은 서너 문장입니다. 이 답안에서 가장 중요한 것 하나를 고르고,
+  다음에 무엇을 연습하면 되는지로 맺으세요. **점수를 매기지 마세요.**
+- 문단을 통째로 번역한 긴 답안이면 문장별로 짚되, 문단 전체의 흐름(지시어,
+  시제의 일관성, 앞뒤 연결)도 overall에서 다루세요.`
 
 var feedbackSchema = map[string]any{
 	"corrected": map[string]any{"type": "string"},
@@ -67,11 +92,16 @@ var feedbackSchema = map[string]any{
 			"properties": map[string]any{
 				"span":  map[string]any{"type": "string"},
 				"why":   map[string]any{"type": "string"},
+				"fix":   map[string]any{"type": "string"},
 				"level": map[string]any{"type": "string", "enum": []string{LevelError, LevelNuance}},
 			},
-			"required":             []string{"span", "why", "level"},
+			"required":             []string{"span", "why", "fix", "level"},
 			"additionalProperties": false,
 		},
+	},
+	"good": map[string]any{
+		"type":  "array",
+		"items": map[string]any{"type": "string"},
 	},
 	"overall": map[string]any{"type": "string"},
 }
@@ -250,7 +280,7 @@ func review(ctx context.Context, c llm.Client, p pack.Problem, a store.Attempt, 
 		ToolDesc:  "학습자의 답안에 대한 첨삭을 제출합니다.",
 		Schema:    feedbackSchema,
 		Required:  []string{"corrected", "notes", "overall"},
-		MaxTokens: 8000,
+		MaxTokens: 16000,
 	})
 	if err != nil {
 		return Feedback{}, err

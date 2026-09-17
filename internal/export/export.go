@@ -74,7 +74,15 @@ func Write(dataDir string, now time.Time) (string, int, error) {
 			if note.Level == tsync.LevelNuance {
 				mark = "  - "
 			}
-			line(mark + note.Span + " : " + note.Why)
+			head := mark + note.Span
+			if note.Fix != "" {
+				head += " -> " + note.Fix
+			}
+			line(head)
+			line("      " + note.Why)
+		}
+		if len(f.Good) > 0 {
+			line("  + 잘 쓴 것: " + strings.Join(f.Good, ", "))
 		}
 		if f.Overall != "" {
 			line("  " + f.Overall)

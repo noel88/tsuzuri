@@ -59,6 +59,9 @@ func RenderProblem(p pack.Problem, st Status, termW int, sel int) string {
 	lines = append(lines, wrapIndent(p.Prompt, w-4, "  ")...)
 	lines = append(lines, "")
 	commands := "주요명령(긴 답 :e)  메뉴(M)  종료(X)  — 빈 줄에서 ⏎ 를 누르면 고를 수 있습니다"
+	if p.IsLong() {
+		commands = "긴 글입니다. 빈 줄에서 ⏎ 를 누르면 편집기가 열립니다.  메뉴(M)  종료(X)"
+	}
 	prompt := "답 >>"
 	if sel >= 0 {
 		commands = ActionBar(AnswerActions, sel)

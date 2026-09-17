@@ -255,3 +255,23 @@ func TestNormalizeLevelLeavesEverythingElse(t *testing.T) {
 		}
 	}
 }
+
+func TestLengthOfSortsPromptsIntoThreeKinds(t *testing.T) {
+	// 포메라 화면은 한 줄에 한글 약 60자다. 단문 한 줄, 중문 다섯 줄,
+	// 장문 스무 줄이라는 감각을 글자 수로 옮긴 것이다.
+	short := "비가 올 것 같아서 우산을 가져왔습니다."
+	medium := strings.Repeat("어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다. ", 3)
+	long := strings.Repeat("요즘 계속 바빠서 방 청소를 할 기력도 없다. ", 15)
+
+	for prompt, want := range map[string]string{short: LenShort, medium: LenMedium, long: LenLong} {
+		if got := LengthOf(prompt); got != want {
+			t.Errorf("%d자 = %q, 기대 %q", len([]rune(prompt)), got, want)
+		}
+	}
+	if !(Problem{Prompt: long}).IsLong() {
+		t.Error("장문인데 한 줄 입력으로 받으려 한다")
+	}
+	if (Problem{Prompt: short}).IsLong() {
+		t.Error("단문에 에디터를 연다")
+	}
+}
