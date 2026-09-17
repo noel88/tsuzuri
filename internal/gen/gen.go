@@ -280,6 +280,16 @@ func validate(p pack.Problem, s Spec) error {
 	return nil
 }
 
+// unique는 아직 안 쓴 ID를 돌려주고 쓴 것으로 표시한다.
+func unique(id string, seen map[string]bool) string {
+	out := id
+	for n := 2; seen[out]; n++ {
+		out = fmt.Sprintf("%s-%d", id, n)
+	}
+	seen[out] = true
+	return out
+}
+
 // safeName은 파일 이름에 쓸 수 없는 글자를 바꾼다.
 func safeName(s string) string {
 	s = strings.TrimSpace(s)
@@ -365,11 +375,18 @@ func writePack(path, dir string, s Spec, ps []pack.Problem) (string, error) {
 	if s.Round > 1 {
 		round = fmt.Sprintf("b%d-", s.Round)
 	}
+	// 그래도 겹치면 번호를 붙인다.
+	//
+	// 묶음 번호는 한 번의 받기 안에서만 늘어난다. 같은 팩에 며칠에 걸쳐
+	// 이어 받으면 번호가 다시 1부터라 또 겹친다. 겹친 채로 두면 답안이
+	// 엉뚱한 문제로 채점되고 그 값을 치르므로, 쓰는 자리에서 막는다.
+	seen := make(map[string]bool, len(ps))
 	enc := json.NewEncoder(f)
 	for _, p := range ps {
 		if !strings.Contains(p.ID, "/") {
 			p.ID = base + "/" + round + p.ID
 		}
+		p.ID = unique(p.ID, seen)
 		if err := enc.Encode(p); err != nil {
 			f.Close()
 			return "", err
