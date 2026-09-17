@@ -20,14 +20,19 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	w := BoxWidth(termW)
 
 	var lines []string
-	lines = append(lines, Banner("綴 / T·S·U·Z·U·R·I", "한↔일 번역 작문 드릴", w)...)
+	lines = append(lines, Banner("綴 / TSUZURI", "한-일 번역 작문 드릴", w)...)
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf("   팩 %d개 · 문제 %d · 첨삭 대기 %d건 · 받은 첨삭 %d건",
 		len(choices), st.Total, st.QueueLen, st.Feedback))
 	lines = append(lines, "")
 
 	leftW := 28
+	// 오른쪽 칼럼은 넓혀도 읽기 좋아지지 않는다. 화면이 넓으면 수치만
+	// 저 멀리 오른쪽 끝으로 밀려나 항목과 떨어져 보인다.
 	rightW := w - leftW - 6
+	if rightW > 36 {
+		rightW = 36
+	}
 	if rightW < 20 {
 		rightW = 20
 	}

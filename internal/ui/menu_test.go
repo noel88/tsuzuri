@@ -12,7 +12,7 @@ func TestRenderMenuListsPacks(t *testing.T) {
 	}
 	out := RenderMenu(choices, Status{Total: 59, QueueLen: 12}, 92)
 
-	for _, want := range []string{"T·S·U·Z·U·R·I", "綴", "자 료 실", "41", "ko2ja", "47", "42", "뉴스", "오프라인"} {
+	for _, want := range []string{"TSUZURI", "綴", "자 료 실", "41", "ko2ja", "47", "42", "뉴스", "오프라인"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("초기화면에 %q가 없다:\n%s", want, out)
 		}

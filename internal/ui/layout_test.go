@@ -40,14 +40,27 @@ func TestRuleTruncatesOverlongTitle(t *testing.T) {
 	}
 }
 
-func TestBoxWidthCapsAt70(t *testing.T) {
-	if got := BoxWidth(200); got != 70 {
-		t.Errorf("BoxWidth(200) = %d, 기대 70", got)
+func TestBoxWidthLeavesSafetyMargin(t *testing.T) {
+	// 「↔」처럼 폭이 애매한 문자를 터미널이 두 칸으로 그리면 한 칸만 넘쳐도
+	// 줄이 접혀 상자가 통째로 어긋난다. 실기에서 제목 줄이 깨진 적이 있다.
+	for _, termW := range []int{128, 200} {
+		if got, want := BoxWidth(termW), termW-safetyMargin; got != want {
+			t.Errorf("BoxWidth(%d) = %d, 기대 %d", termW, got, want)
+		}
 	}
 }
 
-func TestBoxWidthUsesFullNarrowScreen(t *testing.T) {
-	if got := BoxWidth(50); got != 50 {
+func TestBoxWidthNeverExceedsScreen(t *testing.T) {
+	for termW := 10; termW <= 200; termW++ {
+		if got := BoxWidth(termW); got > termW {
+			t.Errorf("BoxWidth(%d) = %d, 화면보다 넓다", termW, got)
+		}
+	}
+}
+
+func TestBoxWidthUsesNarrowScreenFully(t *testing.T) {
+	// 좁은 화면에서까지 6칸을 떼면 남는 게 없다. 거의 다 쓴다.
+	if got := BoxWidth(50); got < 44 {
 		t.Errorf("좁은 화면에서는 꽉 써야 한다: %d", got)
 	}
 }
