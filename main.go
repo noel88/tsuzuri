@@ -137,6 +137,7 @@ func (a *app) run() error {
 		}
 		key, eof := pending, false
 		if pending == "" {
+			ui.Clear(a.out)
 			fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW))
 
 			line, isEOF, err := ui.ReadLine(a.in)
@@ -358,6 +359,7 @@ func (a *app) review() (bool, error) {
 			continue
 		}
 		st := ui.Status{Index: i + 1, Total: len(feedback), Online: a.online}
+		ui.Clear(a.out)
 		fmt.Fprint(a.out, ui.RenderFeedback(p, at, f, st, a.termW))
 
 		line, eof, err := ui.ReadLine(a.in)
@@ -401,6 +403,7 @@ func (a *app) setup() error {
 			"  파일은 그대로 둡니다. 직접 고치려면 config.toml을 여세요.\n  " + err.Error())
 		c = config.Default()
 	}
+	ui.Clear(a.out)
 	fmt.Fprint(a.out, ui.RenderSetup(c, ui.Status{}, a.termW))
 
 	line, _, err := ui.ReadLine(a.in)

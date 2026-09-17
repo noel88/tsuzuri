@@ -59,6 +59,7 @@ func (s *Session) Run() (Outcome, error) {
 		p := s.Problems[i]
 		st := ui.Status{Index: i + 1, Total: len(s.Problems), QueueLen: queueLen, Online: s.Online}
 
+		ui.Clear(s.Out)
 		fmt.Fprint(s.Out, ui.RenderProblem(p, st, s.TermW))
 
 		answer, eof, err := s.readAnswer()
@@ -111,6 +112,7 @@ func (s *Session) Run() (Outcome, error) {
 		queueLen++
 		st.QueueLen = queueLen
 
+		ui.Clear(s.Out)
 		fmt.Fprint(s.Out, ui.RenderResult(p, answer, a, st, s.TermW))
 
 		cmdLine, cmdEOF, err := ui.ReadLine(s.In)
