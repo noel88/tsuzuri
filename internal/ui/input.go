@@ -31,15 +31,38 @@ const (
 // 두 번째 반환값은 입력이 끝났는지(EOF) 여부다.
 // 빈 줄과 입력 종료를 구분해야 드릴 루프가 무한히 돌지 않는다.
 func ReadLine(r *bufio.Reader) (string, bool, error) {
-	line, err := r.ReadString('\n')
-	if err == io.EOF {
-		// EOF 직전에 읽은 내용은 유효하다.
-		return strings.TrimRight(line, "\r\n"), true, nil
+	var b strings.Builder
+	for {
+		c, err := r.ReadByte()
+		if err == io.EOF {
+			// EOF 직전에 읽은 내용은 유효하다.
+			return b.String(), true, nil
+		}
+		if err != nil {
+			return "", false, err
+		}
+		switch c {
+		case '\n':
+			return b.String(), false, nil
+		case '\r':
+			// 줄 끝을 \n 하나로만 보면 안 된다.
+			//
+			// 터미널이 Enter의 \r을 \n으로 바꿔 주는 것은 보통 모드일
+			// 때뿐이다. 화살표를 읽느라 잠깐 raw mode였던 동안 버퍼에
+			// 들어온 바이트는 그 변환을 거치지 않아 \r 그대로 남는다.
+			// 그것을 못 알아보면 이미 들어와 있는 줄을 영영 못 읽고
+			// 다음 입력을 기다린다 — 초기화면에서 Enter를 누르고 곧바로
+			// 답을 쳐 넣으면 그 답안이 통째로 사라졌다.
+			if r.Buffered() > 0 {
+				if p, _ := r.Peek(1); len(p) == 1 && p[0] == '\n' {
+					r.Discard(1)
+				}
+			}
+			return b.String(), false, nil
+		default:
+			b.WriteByte(c)
+		}
 	}
-	if err != nil {
-		return "", false, err
-	}
-	return strings.TrimRight(line, "\r\n"), false, nil
 }
 
 // ParseCommand는 결과 화면의 입력을 해석한다.

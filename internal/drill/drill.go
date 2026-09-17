@@ -59,7 +59,7 @@ func (s *Session) Run() (Outcome, error) {
 		s.TermW = ui.TermWidth()
 	}
 	if s.Keys != nil && ui.Interactive() {
-		s.keys = ui.NewKeyReader(s.Keys)
+		s.keys = ui.NewKeyReader(s.In, s.Keys)
 	}
 
 	attemptsPath := filepath.Join(s.DataDir, "attempts.jsonl")

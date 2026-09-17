@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bufio"
 	"os"
 	"unicode/utf8"
 
@@ -48,17 +49,21 @@ func Interactive() bool {
 
 // KeyReader는 키를 하나씩 읽는다.
 //
-// 아직 다 쓰지 않은 바이트를 들고 있어야 한다. 화살표는 ESC [ A 처럼 세
-// 바이트로 오고 터미널은 그것을 한 덩어리로 건네주는데, 키를 연달아 누르면
-// 한 번의 읽기에 여러 키가 함께 온다. 읽은 만큼 버리면 두 번째부터 씹힌다 —
-// 화살표를 꾹 누르면 한 칸만 움직였다.
+// 한 줄씩 읽는 쪽과 **같은 버퍼**를 본다. 이것이 중요하다. 예전에는 파일에서
+// 직접 한 덩어리를 읽어 남은 바이트를 자기 안에 들고 있었는데, 다음 화면이
+// 한 줄 읽기로 넘어가면 그 바이트를 아무도 못 봤다. 초기화면에서 Enter를
+// 누르고 곧바로 답을 쳐 넣으면 — 사람이 빠르게 치면 한 덩어리로 온다 —
+// 답안이 통째로 사라졌다. 저장도 안 되고 화면은 답을 기다리고 있었다.
 type KeyReader struct {
-	f    *os.File
-	rest []byte
+	in *bufio.Reader
+	f  *os.File
 }
 
-// NewKeyReader는 f에서 키를 읽는 읽개를 만든다.
-func NewKeyReader(f *os.File) *KeyReader { return &KeyReader{f: f} }
+// NewKeyReader는 in에서 키를 읽는 읽개를 만든다.
+// f는 raw mode를 걸 대상이고, 읽기는 언제나 in으로 한다.
+func NewKeyReader(in *bufio.Reader, f *os.File) *KeyReader {
+	return &KeyReader{in: in, f: f}
+}
 
 // Read는 키 하나를 읽는다. 읽는 동안에만 터미널을 raw mode로 둔다.
 //
@@ -66,95 +71,91 @@ func NewKeyReader(f *os.File) *KeyReader { return &KeyReader{f: f} }
 // 터미널이 raw인 채로 남을 틈이 거의 없다. 포메라는 예고 없이 꺼지는
 // 기계이고, 에코가 꺼진 셸을 기기 앞에서 되살리는 것은 성가신 일이다.
 func (r *KeyReader) Read() (KeyPress, error) {
-	if len(r.rest) == 0 {
-		fd := int(r.f.Fd())
-		state, err := term.MakeRaw(fd)
-		if err != nil {
-			return KeyPress{}, err
-		}
-		buf := make([]byte, 32)
-		n, err := r.f.Read(buf)
-		term.Restore(fd, state)
-		if err != nil || n == 0 {
-			return KeyPress{Key: KeyQuit}, nil
-		}
-		r.rest = buf[:n]
+	fd := int(r.f.Fd())
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return KeyPress{}, err
+	}
+	defer term.Restore(fd, state)
+
+	b, err := r.in.ReadByte()
+	if err != nil {
+		return KeyPress{Key: KeyQuit}, nil
 	}
 
-	k, used := parseKey(r.rest, r.f)
-	r.rest = r.rest[used:]
-	return k, nil
-}
-
-// parseKey는 앞에서부터 키 하나를 떼어 내고, 쓴 바이트 수를 함께 돌려준다.
-func parseKey(b []byte, f *os.File) (KeyPress, int) {
-	switch b[0] {
+	switch b {
 	case 0x03, 0x04: // Ctrl+C, Ctrl+D
 		// raw mode에서는 Ctrl+C가 신호가 아니라 바이트로 온다. 신호였다면
 		// defer가 돌지 못해 터미널이 raw인 채로 남는다 — 바이트로 받는
 		// 편이 오히려 안전하다.
-		return KeyPress{Key: KeyQuit}, 1
+		return KeyPress{Key: KeyQuit}, nil
 	case '\r', '\n':
-		return KeyPress{Key: KeyEnter}, 1
+		return KeyPress{Key: KeyEnter}, nil
 	case 0x1b:
-		return parseEscape(b)
+		return r.escape(), nil
 	}
 
-	if b[0] < utf8.RuneSelf {
-		return KeyPress{Key: KeyRune, Rune: rune(b[0])}, 1
+	if b < utf8.RuneSelf {
+		return KeyPress{Key: KeyRune, Rune: rune(b)}, nil
 	}
-	r, size := utf8.DecodeRune(b)
-	if r == utf8.RuneError && size <= 1 {
-		// 글자가 덩어리에 걸쳐 잘렸다. 나머지를 마저 읽는다.
-		return KeyPress{Key: KeyRune, Rune: readRune(f, b)}, len(b)
-	}
-	return KeyPress{Key: KeyRune, Rune: r}, size
+	return KeyPress{Key: KeyRune, Rune: r.rune(b)}, nil
 }
 
-// parseEscape는 ESC로 시작하는 덩어리를 본다. ESC뿐이면 ESC 자체다.
-func parseEscape(b []byte) (KeyPress, int) {
-	if len(b) < 3 {
-		return KeyPress{Key: KeyEscape}, 1
+// escape는 ESC 뒤에 붙어 온 것을 본다. 아무것도 안 붙었으면 ESC 자체다.
+//
+// 이미 버퍼에 들어와 있는 것만 본다. 더 읽으러 가면 ESC만 누른 사람을
+// 다음 키를 누를 때까지 기다리게 만든다.
+func (r *KeyReader) escape() KeyPress {
+	if r.in.Buffered() < 2 {
+		return KeyPress{Key: KeyEscape}
+	}
+	p, err := r.in.Peek(2)
+	if err != nil {
+		return KeyPress{Key: KeyEscape}
 	}
 	// ESC [ A 와 ESC O A 를 둘 다 받는다. 커서 키는 터미널이 어느 모드에
 	// 있느냐에 따라 두 꼴로 온다.
-	if b[1] != '[' && b[1] != 'O' {
-		return KeyPress{Key: KeyEscape}, 1
+	if p[0] != '[' && p[0] != 'O' {
+		return KeyPress{Key: KeyEscape}
 	}
-	switch b[2] {
+	var k Key
+	switch p[1] {
 	case 'A':
-		return KeyPress{Key: KeyUp}, 3
+		k = KeyUp
 	case 'B':
-		return KeyPress{Key: KeyDown}, 3
+		k = KeyDown
 	case 'C':
-		return KeyPress{Key: KeyRight}, 3
+		k = KeyRight
 	case 'D':
-		return KeyPress{Key: KeyLeft}, 3
+		k = KeyLeft
+	default:
+		// 모르는 열이다. ESC만 쓰고 나머지는 다음 차례에 본다 —
+		// 통째로 버리면 뒤에 붙어 온 진짜 키까지 잃는다.
+		return KeyPress{Key: KeyEscape}
 	}
-	// 모르는 열이다. ESC 하나만 쓰고 나머지는 다음 차례에 본다 —
-	// 통째로 버리면 뒤에 붙어 온 진짜 키까지 잃는다.
-	return KeyPress{Key: KeyEscape}, 1
+	r.in.Discard(2)
+	return KeyPress{Key: k}
 }
 
-// readRune은 잘린 글자의 나머지를 마저 읽어 글자 하나를 만든다.
-func readRune(f *os.File, head []byte) rune {
+// rune은 첫 바이트를 받은 뒤 나머지를 마저 읽어 글자 하나를 만든다.
+func (r *KeyReader) rune(first byte) rune {
 	n := 1
 	switch {
-	case head[0]&0xE0 == 0xC0:
+	case first&0xE0 == 0xC0:
 		n = 2
-	case head[0]&0xF0 == 0xE0:
+	case first&0xF0 == 0xE0:
 		n = 3
-	case head[0]&0xF8 == 0xF0:
+	case first&0xF8 == 0xF0:
 		n = 4
 	}
-	buf := append([]byte(nil), head...)
-	for len(buf) < n {
-		var b [1]byte
-		if _, err := f.Read(b[:]); err != nil {
+	buf := []byte{first}
+	for len(buf) < n && r.in.Buffered() > 0 {
+		b, err := r.in.ReadByte()
+		if err != nil {
 			break
 		}
-		buf = append(buf, b[0])
+		buf = append(buf, b)
 	}
-	r, _ := utf8.DecodeRune(buf)
-	return r
+	c, _ := utf8.DecodeRune(buf)
+	return c
 }
