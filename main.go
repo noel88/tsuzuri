@@ -83,7 +83,7 @@ func newApp() *app {
 		warned:     map[string]bool{},
 	}
 	if ui.Interactive() {
-		a.keys = ui.NewKeyReader(os.Stdin)
+		a.keys = ui.NewKeyReader(a.in, os.Stdin)
 	}
 	return a
 }

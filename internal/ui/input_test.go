@@ -148,3 +148,43 @@ func TestFullWidthCancelAndEditor(t *testing.T) {
 		t.Error("전각 :e도 에디터 요청이어야 한다")
 	}
 }
+
+func TestReadLineAcceptsCarriageReturn(t *testing.T) {
+	// 화살표를 읽느라 잠깐 raw mode였던 동안 버퍼에 들어온 바이트는
+	// 터미널의 \r → \n 변환을 거치지 않는다. 그것을 못 알아보면 이미
+	// 들어와 있는 줄을 영영 못 읽는다 — 답안이 통째로 사라졌다.
+	r := bufio.NewReader(strings.NewReader("こたえ\r"))
+	got, eof, err := ReadLine(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "こたえ" || eof {
+		t.Errorf("ReadLine = %q, eof=%v", got, eof)
+	}
+}
+
+func TestReadLineSplitsBurstIntoLines(t *testing.T) {
+	// 사람이 빠르게 치면 여러 줄이 한 덩어리로 온다. 섞여 있어도 각각
+	// 제 줄로 끊겨야 한다.
+	r := bufio.NewReader(strings.NewReader("첫째\r둘째\n셋째\r\n넷째\r"))
+	for _, want := range []string{"첫째", "둘째", "셋째", "넷째"} {
+		got, _, err := ReadLine(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("ReadLine = %q, 기대 %q", got, want)
+		}
+	}
+}
+
+func TestReadLineKeepsWhatCameBeforeEOF(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader("끝줄"))
+	got, eof, err := ReadLine(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "끝줄" || !eof {
+		t.Errorf("ReadLine = %q, eof=%v", got, eof)
+	}
+}
