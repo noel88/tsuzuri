@@ -2,14 +2,25 @@ package ui
 
 import "strings"
 
-// BoxWidth는 본문 블록 폭이다. 화면을 꽉 채운다.
+// safetyMargin은 폭 계산이 어긋나도 줄이 접히지 않도록 남기는 여유다.
+//
+// 「↔」「·」「✓」처럼 East Asian Ambiguous로 분류된 문자는 터미널마다 한 칸
+// 또는 두 칸으로 그려진다. 우리가 한 칸으로 세는데 두 칸으로 그려지면 줄이
+// 화면 폭을 넘겨 접히고, 그러면 상자와 가로줄이 통째로 어긋난다. 실기에서
+// 제목 줄이 두 줄로 깨지는 것으로 드러났다.
+const safetyMargin = 6
+
+// BoxWidth는 본문 블록 폭이다. 화면을 (여유를 남기고) 채운다.
 //
 // 포메라 fbterm은 128칸이라 70칸으로 고정하면 좌우에 큰 여백이 남아 화면이
 // 비어 보인다. 기기를 손에 들고 쓰는 물건이라 화면을 다 쓰는 편이 낫다.
 // 긴 줄은 wrap()이 표시폭 기준으로 접는다.
 func BoxWidth(termW int) int {
-	w := termW - 2
+	w := termW - safetyMargin
 	if w < 40 {
+		w = termW - 2
+	}
+	if w < 10 {
 		w = termW
 	}
 	return w
