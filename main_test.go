@@ -204,3 +204,14 @@ func TestExtendableSkipsFullPacks(t *testing.T) {
 		t.Error("꽉 찬 팩에 이어 받으려 한다")
 	}
 }
+
+func TestExtendableSkipsPacksWithBlankLevels(t *testing.T) {
+	// levels()는 빈 값을 건너뛰므로 레벨이 비어 있는 문항이 섞여도
+	// 「단일 레벨」로 보인다. 그런 팩에 이어 받으면 라벨이 거짓말을 한다.
+	sets := []packSet{{key: "41", dir: pack.KoToJa, problems: []pack.Problem{
+		{ID: "p1", Level: "N2"}, {ID: "p2", Level: ""},
+	}}}
+	if _, ok := extendable(sets, pack.KoToJa, "N2"); ok {
+		t.Error("레벨이 빈 문항이 섞인 팩을 골랐다")
+	}
+}

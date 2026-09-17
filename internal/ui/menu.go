@@ -24,17 +24,20 @@ type Cursor struct {
 // menuEntry는 왼쪽 칸의 항목 하나다.
 type menuEntry struct{ key, label string }
 
-func leftEntries(st Status, choices []Choice) []menuEntry {
+func leftEntries(st Status, _ []Choice) []menuEntry {
 	review := "복습 드릴"
 	if st.Due > 0 {
 		review = fmt.Sprintf("복습 드릴 (%d)", st.Due)
 	}
-	// 「드릴 시작」은 자료실 맨 위 팩을 연다. 어느 팩인지 적어 두지 않으면
-	// 누르기 전에는 알 수 없다 — 자료실이 팩마다 한 줄이 된 뒤로 그 줄이
-	// 여럿이고, 무엇이 맨 위인지는 정렬 규칙을 알아야 짐작이 된다.
+	// 「드릴 시작」이 어느 팩을 여는지 적는다. 적어 두지 않으면 누르기
+	// 전에는 알 수 없다 — 자료실이 팩마다 한 줄이 된 뒤로 그 줄이 여럿이다.
+	//
+	// 자료실 첫 줄이 아니라 실제로 열릴 팩을 받는다. 다 푼 팩을 펼쳐 놓으면
+	// 첫 줄과 열릴 팩이 달라져서, 화면이 「드릴 시작 (41)」이라고 해 놓고
+	// 43번을 여는 일이 있었다.
 	start := "드릴 시작"
-	if len(choices) > 0 {
-		start = fmt.Sprintf("드릴 시작 (%s)", choices[0].Key)
+	if st.StartKey != "" {
+		start = fmt.Sprintf("드릴 시작 (%s)", st.StartKey)
 	}
 	return []menuEntry{
 		{"1", start},
@@ -132,8 +135,10 @@ func RenderMenu(choices []Choice, st Status, termW int, cur Cursor) string {
 	var lines []string
 	lines = append(lines, Banner("綴 / TSUZURI", "한-일 번역 작문 드릴", w)...)
 	lines = append(lines, "")
+	// 팩 수는 화면에 보이는 줄 수가 아니다. 접어 둔 팩도 팩이고, 자료실에
+	// 얹은 토글 줄은 팩이 아니다.
 	lines = append(lines, fmt.Sprintf("   팩 %d개 · 문제 %d · 첨삭 대기 %d건 · 받은 첨삭 %d건",
-		len(choices), st.Total, st.QueueLen, st.Feedback))
+		st.Packs, st.Total, st.QueueLen, st.Feedback))
 	lines = append(lines, "")
 
 	leftW := 28

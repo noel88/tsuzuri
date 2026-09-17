@@ -263,12 +263,10 @@ func (s *Session) rows() int {
 // 고르기 줄을 띄운다.
 func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, bool, error) {
 	for {
+		st.Warn = s.warn
+		s.warn = ""
 		page, _ := ui.Scroll(ui.RenderProblem(p, st, s.TermW, -1), s.rows(), 0)
 		ui.Clear(s.Out)
-		if s.warn != "" {
-			fmt.Fprintf(s.Out, "  %s\n\n", s.warn)
-			s.warn = ""
-		}
 		fmt.Fprint(s.Out, page)
 
 		line, eof, err := ui.ReadLine(s.In)
@@ -288,8 +286,18 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 			}
 			// 편집기를 저장 없이 닫았다. 그대로 넘기면 문항 하나가 기록도
 			// 없이 사라진다 — 잘못 연 것일 수도 있으니 무엇을 할지 묻는다.
-			if cmd, err := s.editorCancelled(p, st); cmd != ui.CmdStay || err != nil {
-				return "", cmd, false, err
+			switch cmd, err := s.editorCancelled(p, st); {
+			case err != nil:
+				return "", ui.CmdStay, false, err
+			case cmd == ui.CmdEdit:
+				// 「긴 답」을 고르면 편집기를 다시 연다. 잘못 닫은 뒤
+				// 고르는 가장 자연스러운 선택지인데, 예전에는 그것이
+				// 문항 버리기로 동작했다.
+				continue
+			case cmd == ui.CmdStay:
+				// 다시 답 치는 화면으로.
+			default:
+				return "", cmd, false, nil
 			}
 			continue
 		}
@@ -312,8 +320,8 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 		if line != "" && !utf8.ValidString(line) {
 			// 입력을 더 받지 않는다. 여기서 한 줄을 읽으면 사용자가 이어서
 			// 다시 친 답안이 그 자리에 먹힌다.
-			s.warn = "입력한 글자가 깨졌습니다. 한글·일본어를 조합하던 중에 Enter를 누르면 " +
-				"마지막 글자가 잘립니다 — 글자가 다 확정된 뒤에 다시 쳐 주세요."
+			s.warn = "입력한 글자가 깨졌습니다. 조합하던 중에 Enter를 누르면 마지막 글자가 " +
+				"잘립니다 — 다 확정된 뒤에 다시 쳐 주세요."
 			continue
 		}
 		// 팩 받기 프롬프트에서 쓰는 :q도 여기서 받는다. 받지 않으면
