@@ -104,3 +104,36 @@ func TestSetupFieldsMatchRenderedNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSetupAnswerRejectsBrokenUTF8(t *testing.T) {
+	// fbterm의 한글 입력기가 조합 중인 글자를 잘라 보낸 꼴.
+	// 「해」(ED 95 B4)의 첫 바이트만 남았다.
+	broken := "조합\xed"
+	c := config.Config{Topic: "일상"}
+
+	got, err := ParseSetupAnswer("topic", broken, c)
+	if err == nil {
+		t.Fatal("깨진 바이트를 통과시키면 config.toml이 못 읽는 파일이 된다")
+	}
+	if got.Topic != "일상" {
+		t.Errorf("거부했으면 기존 값이 남아야 한다: %q", got.Topic)
+	}
+}
+
+func TestParseSetupAnswerNormalizesBareLevel(t *testing.T) {
+	got, err := ParseSetupAnswer("level", "2", config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Level != "N2" {
+		t.Errorf("level = %q, 기대 \"N2\"", got.Level)
+	}
+	// N을 뺀 한 자리 숫자만 고친다. 나머지는 사용자의 값이다.
+	got, err = ParseSetupAnswer("level", "초급", config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Level != "초급" {
+		t.Errorf("level = %q, 그대로 둬야 한다", got.Level)
+	}
+}

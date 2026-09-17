@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/noel88/tsuzuri/internal/config"
 )
@@ -70,6 +71,18 @@ func maskKey(k string) string {
 	return k[:10] + "…"
 }
 
+// normalizeLevel은 "2"처럼 N을 뺀 입력을 "N2"로 고친다.
+//
+// 레벨은 자유 문자열이라 무엇이든 받지만, 그 값이 그대로 생성 프롬프트에
+// 들어간다. "2"만 적힌 채로 팩을 받으면 엉뚱한 난이도가 나오고, 그 호출은
+// 이미 과금된 뒤다. 실기 설정 파일에 level = "2"가 들어 있었다.
+func normalizeLevel(s string) string {
+	if len(s) == 1 && s[0] >= '1' && s[0] <= '5' {
+		return "N" + s
+	}
+	return s
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "(없음)"
@@ -84,13 +97,24 @@ func ParseSetupAnswer(field, input string, c config.Config) (config.Config, erro
 	if input == "" {
 		return c, nil
 	}
+	// 깨진 바이트를 설정 파일에 들이지 않는다.
+	//
+	// 실기에서 topic 의 마지막 글자가 세 바이트 중 한 바이트만 남은 채로
+	// 저장된 적이 있다. fbterm 의 한글 입력기가 조합 중인 글자를 확정하기
+	// 전에 Enter 가 들어가면 그렇게 된다. 그 한 바이트 때문에 TOML 파싱이
+	// 실패하고, 설정을 읽어야 하는 5·6번이 통째로 막힌다. 여기서 막으면
+	// 사용자는 한 줄 다시 치면 되지만, 통과시키면 파일을 손으로 고쳐야 한다.
+	if !utf8.ValidString(input) {
+		return c, fmt.Errorf("입력한 글자가 깨졌습니다. 한글을 조합하던 중에 Enter를 누르면 " +
+			"마지막 글자가 잘립니다 — 글자가 다 확정된 뒤에 다시 입력해 주세요")
+	}
 	switch field {
 	case "api_key":
 		c.APIKey = input
 	case "model":
 		c.Model = input
 	case "level":
-		c.Level = input
+		c.Level = normalizeLevel(input)
 	case "topic":
 		c.Topic = input
 	case "pack_size":
