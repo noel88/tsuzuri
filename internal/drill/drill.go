@@ -214,15 +214,17 @@ func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Ana
 			return ui.ActionAt(ui.ResultActions, sel), false, nil
 		case ui.KeyLeft, ui.KeyRight:
 			sel = ui.MoveAction(sel, k.Key, len(ui.ResultActions))
-		case ui.KeyEscape:
-			return ui.CmdMenu, false, nil
 		case ui.KeyRune:
 			// 글자 키도 그대로 받는다. 입력기가 켜져 있으면 글자가
 			// 조합으로 먹히는데, 그때는 화살표가 대신한다.
-			if cmd := ui.ParseCommand(string(k.Rune)); cmd != ui.CmdNext {
+			if cmd, ok := ui.ActionByKey(ui.ResultActions, k.Rune); ok {
 				return cmd, false, nil
 			}
 		}
+		// ESC는 아무것도 하지 않는다. 예전에는 메뉴로 나갔는데, 화살표의
+		// ESC와 구별하려면 뒤에 무엇이 붙어 오는지를 봐야 한다. 터미널이
+		// 세 바이트를 나눠 건네주는 순간에 방향키 한 번으로 드릴이
+		// 끝나 버린다. 메뉴로는 M이나 고르기 줄로 나간다.
 	}
 }
 
@@ -246,6 +248,11 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 		if ui.IsEditorRequest(line) {
 			text, err := ui.ReadFromEditor("", "")
 			return text, ui.CmdStay, eof, err
+		}
+		// 팩 받기 프롬프트에서 쓰는 :q도 여기서 받는다. 받지 않으면
+		// 그것이 답안으로 저장되어 첨삭 요청으로 나가고 값을 치른다.
+		if ui.IsCancel(trimmed) {
+			return "", ui.CmdMenu, eof, nil
 		}
 		// 답안 자리에서도 M/X로 빠져나갈 수 있다.
 		if trimmed != "" {
@@ -296,7 +303,7 @@ func (s *Session) chooseAnswerAction(p pack.Problem, st ui.Status) (ui.Command, 
 		case ui.KeyEscape:
 			return ui.CmdStay, nil
 		case ui.KeyRune:
-			if cmd := ui.ParseCommand(string(k.Rune)); cmd != ui.CmdNext {
+			if cmd, ok := ui.ActionByKey(ui.AnswerActions, k.Rune); ok {
 				return cmd, nil
 			}
 		}

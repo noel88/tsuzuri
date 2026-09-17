@@ -40,6 +40,15 @@ var Intervals = []time.Duration{
 	7 * 24 * time.Hour,
 }
 
+// pendingTTL은 첨삭을 기다려 주는 한도다.
+//
+// 답은 냈는데 첨삭이 오지 않는 일이 있다. sync가 영구 실패로 판정해 큐에서
+// 빼거나, 답안을 못 찾아 버리면 그 첨삭은 영영 생기지 않는다. 그때 카드가
+// 「기다리는 중」에 갇히면 복습 드릴이 그 문제를 다시는 내주지 않는데,
+// 사용자는 왜 안 나오는지 알 길이 없다. 한도가 지나면 다시 낼 차례로 본다 —
+// 한 번 더 푸는 것이 영영 안 나오는 것보다 낫다.
+const pendingTTL = 14 * 24 * time.Hour
+
 // State는 복습 카드가 지금 어느 상태인지다.
 type State int
 
@@ -106,9 +115,10 @@ func Cards(attempts []store.Attempt, feedback []tsync.Feedback, marks []Mark, no
 		sort.SliceStable(events, func(i, j int) bool { return events[i].at.Before(events[j].at) })
 
 		var (
-			seeded  bool
-			card    Card
-			pending bool // 마지막 답안의 첨삭이 아직 안 왔다
+			seeded    bool
+			card      Card
+			pending   bool      // 마지막 답안의 첨삭이 아직 안 왔다
+			pendingAt time.Time // 그 답안을 낸 때
 		)
 		card.ProblemID = id
 
@@ -128,7 +138,7 @@ func Cards(attempts []store.Attempt, feedback []tsync.Feedback, marks []Mark, no
 				}
 
 			case !e.graded:
-				pending = true
+				pending, pendingAt = true, e.at
 
 			case e.failed:
 				pending = false
@@ -144,6 +154,11 @@ func Cards(attempts []store.Attempt, feedback []tsync.Feedback, marks []Mark, no
 		}
 		if !seeded {
 			continue
+		}
+
+		// 너무 오래 기다린 것은 기다리기를 그만둔다.
+		if pending && now.Sub(pendingAt) > pendingTTL {
+			pending = false
 		}
 
 		switch {

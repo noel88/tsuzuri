@@ -294,12 +294,16 @@ func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 }
 
 func (a *app) drill(set packSet) (bool, error) {
-	return a.drillFrom(set.problems, set.dir, 0)
+	return a.drillFrom(set.problems, set.dir, 0, set.key)
 }
 
 // drillFrom은 주어진 문제들을 start번째부터 낸다.
-func (a *app) drillFrom(problems []pack.Problem, dir pack.Direction, start int) (bool, error) {
-	az, err := a.analyzerFor(dir)
+//
+// back은 사전을 바꾸느라 다시 실행했을 때 돌아올 화면이다. 그 방향의 첫
+// 팩으로 되돌리면 안 된다 — 사용자가 고른 것은 그 팩이 아니고, 이어하기면
+// 이어하던 자리도 함께 잃는다.
+func (a *app) drillFrom(problems []pack.Problem, dir pack.Direction, start int, back string) (bool, error) {
+	az, err := a.analyzerFor(dir, back)
 	if err != nil {
 		return false, err
 	}
@@ -334,12 +338,12 @@ func (a *app) drillFrom(problems []pack.Problem, dir pack.Direction, start int) 
 //
 // DictShrink()는 102MB까지 줄여 주지만 BaseForm과 Expression을 함께
 // 버려서 분석이 성립하지 않는다 (internal/analyze/shrink_test.go).
-func (a *app) analyzerFor(d pack.Direction) (*analyze.Analyzer, error) {
+func (a *app) analyzerFor(d pack.Direction, back string) (*analyze.Analyzer, error) {
 	if a.analyzer != nil {
 		if a.analyzerDir == d {
 			return a.analyzer, nil
 		}
-		return nil, a.restartFor(d)
+		return nil, a.restartTo(d, back)
 	}
 	az, err := a.loadDictionary(d)
 	if err != nil {
@@ -404,16 +408,11 @@ func (a *app) loadDictionary(d pack.Direction) (*analyze.Analyzer, error) {
 // gotoEnv는 재실행 후 곧바로 열 메뉴 번호를 넘기는 환경변수다.
 const gotoEnv = "TSUZURI_GOTO"
 
-// restartFor는 다른 방향을 열기 위해 자기 자신을 다시 실행한다.
+// restartTo는 다른 방향을 열기 위해 자기 자신을 다시 실행하고, 돌아오면
+// gotoKey 화면을 연다.
 //
 // 성공하면 돌아오지 않는다. exec가 프로세스 이미지를 교체하므로
 // 이전 사전이 차지하던 메모리는 OS가 회수한다.
-func (a *app) restartFor(d pack.Direction) error {
-	key, _ := a.keyForDir(d)
-	return a.restartTo(d, key)
-}
-
-// restartTo는 다시 실행한 뒤 gotoKey 화면을 연다.
 func (a *app) restartTo(d pack.Direction, gotoKey string) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -429,20 +428,6 @@ func (a *app) restartTo(d pack.Direction, gotoKey string) error {
 		return fmt.Errorf("다시 실행하지 못했습니다. 앱을 끄고 다시 켜 주세요: %w", err)
 	}
 	return nil // 도달하지 않는다
-}
-
-// keyForDir은 그 방향의 팩에 해당하는 메뉴 번호를 찾는다.
-func (a *app) keyForDir(d pack.Direction) (string, bool) {
-	sets, err := a.loadPackSets()
-	if err != nil {
-		return "", false
-	}
-	for _, s := range sets {
-		if s.dir == d {
-			return s.key, true
-		}
-	}
-	return "", false
 }
 
 // known은 지금 자료실에 있는 문제를 ID로 찾을 수 있게 모은다.
@@ -481,9 +466,11 @@ func (a *app) resume(sets []packSet) (bool, error) {
 			}
 			if i+1 >= len(set.problems) {
 				a.notice(fmt.Sprintf("%s 팩은 끝까지 풀었습니다. 처음부터 다시 냅니다.", set.label()))
-				return a.drillFrom(set.problems, set.dir, 0)
+				return a.drillFrom(set.problems, set.dir, 0, "2")
 			}
-			return a.drillFrom(set.problems, set.dir, i+1)
+			// 재실행하게 되면 이어하기 화면으로 돌아온다. 팩 번호로
+			// 돌아오면 그 팩의 처음부터 다시 내게 된다.
+			return a.drillFrom(set.problems, set.dir, i+1, "2")
 		}
 	}
 	a.notice("마지막으로 푼 문제가 있던 팩이 보이지 않습니다. 팩을 지웠다면 1번으로 새로 시작하세요.")
@@ -522,7 +509,7 @@ func (a *app) reviewDrill(sets []packSet) (bool, error) {
 		return false, a.restartTo(dir, "3")
 	}
 
-	quit, err := a.drillFrom(groups[dir], dir, 0)
+	quit, err := a.drillFrom(groups[dir], dir, 0, "3")
 	if err != nil || quit {
 		return quit, err
 	}

@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bufio"
+	"os"
 	"strings"
 	"testing"
 )
@@ -154,5 +156,47 @@ func TestMoveActionStopsAtEnds(t *testing.T) {
 	}
 	if ActionAt(ResultActions, sel) != CmdQuit {
 		t.Error("맨 뒤는 종료여야 한다")
+	}
+}
+
+func TestActionByKeyOnlyAcceptsKeysOnTheBar(t *testing.T) {
+	// 그 줄에 없는 글자를 받으면 사용자가 모르는 일이 일어난다. 답안
+	// 화면의 고르기 줄에서 b를 누르면 표시도 안 남긴 채 문제만 넘어갔다.
+	if _, ok := ActionByKey(AnswerActions, 'b'); ok {
+		t.Error("답안 고르기 줄에 없는 b를 받았다")
+	}
+	if cmd, ok := ActionByKey(AnswerActions, 'x'); !ok || cmd != CmdQuit {
+		t.Errorf("X = %v, %v", cmd, ok)
+	}
+	// 결과 화면에는 있는 키다.
+	if cmd, ok := ActionByKey(ResultActions, 'B'); !ok || cmd != CmdMark {
+		t.Errorf("결과 화면의 B = %v, %v", cmd, ok)
+	}
+	if _, ok := ActionByKey(ResultActions, 'z'); ok {
+		t.Error("아무 글자나 받는다")
+	}
+}
+
+func TestEscapeSequenceIsSwallowedWhole(t *testing.T) {
+	// Delete(ESC [ 3 ~)처럼 모르는 열을 남겨 두면 그 바이트를 다음 줄
+	// 읽기가 답안의 첫 글자로 읽는다. 「[3~」로 시작하는 답안이 저장되고
+	// 첨삭 요청으로 나가 값을 치렀다.
+	in := bufio.NewReader(strings.NewReader("\x1b[3~답안입니다\r"))
+	kr := NewKeyReader(in, os.Stdin)
+	_ = kr // raw mode는 터미널이 있어야 하므로 여기서는 열 해석만 본다.
+
+	// escape()는 ESC를 이미 읽은 다음 상태를 본다.
+	if b, _ := in.ReadByte(); b != 0x1b {
+		t.Fatal("첫 바이트가 ESC가 아니다")
+	}
+	if got := kr.escape(); got.Key != KeyEscape {
+		t.Errorf("모르는 열을 키로 읽었다: %+v", got)
+	}
+	line, _, err := ReadLine(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != "답안입니다" {
+		t.Errorf("답안 = %q — 이스케이프 바이트가 섞였다", line)
 	}
 }

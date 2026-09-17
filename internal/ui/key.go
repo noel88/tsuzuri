@@ -129,12 +129,58 @@ func (r *KeyReader) escape() KeyPress {
 	case 'D':
 		k = KeyLeft
 	default:
-		// 모르는 열이다. ESC만 쓰고 나머지는 다음 차례에 본다 —
-		// 통째로 버리면 뒤에 붙어 온 진짜 키까지 잃는다.
+		// Delete·Home·기능키 같은 모르는 열이다. 통째로 버린다.
+		//
+		// 남겨 두면 그 바이트를 다음 줄 읽기가 답안의 첫 글자로 읽는다.
+		// 「[3~」로 시작하는 답안이 저장되고 첨삭 요청으로 나가 값을
+		// 치른다. 실제로 그랬다.
+		r.discardSequence()
 		return KeyPress{Key: KeyEscape}
 	}
 	r.in.Discard(2)
 	return KeyPress{Key: k}
+}
+
+// discardSequence는 이미 들어와 있는 이스케이프 열의 나머지를 버린다.
+//
+// 버퍼의 앞은 '[' (CSI) 이거나 'O' (SS3) 다. CSI 열은 매개변수(0x30~0x3F)와
+// 중간 바이트(0x20~0x2F)가 이어지다가 0x40~0x7E 의 글자로 끝난다.
+//
+// 버퍼에 있는 만큼만 본다 — 더 읽으러 가면 열이 아니었을 때 사용자를
+// 기다리게 만든다. 열에 속하지 않는 바이트를 만나면 거기서 멈춘다.
+// 남은 것을 몽땅 버리면 뒤에 이어 친 답안까지 먹는다.
+func (r *KeyReader) discardSequence() {
+	p, err := r.in.Peek(1)
+	if err != nil {
+		return
+	}
+	if p[0] == 'O' {
+		// ESC O 다음 한 글자로 끝난다.
+		n := 2
+		if b := r.in.Buffered(); b < n {
+			n = b
+		}
+		r.in.Discard(n)
+		return
+	}
+
+	for i := 1; i < r.in.Buffered(); i++ {
+		q, err := r.in.Peek(i + 1)
+		if err != nil {
+			break
+		}
+		c := q[i]
+		switch {
+		case c >= 0x40 && c <= 0x7e: // 마지막 글자
+			r.in.Discard(i + 1)
+			return
+		case c >= 0x20 && c <= 0x3f: // 매개변수·중간 바이트
+		default: // 열이 아니다. 여기까지만 버린다.
+			r.in.Discard(i)
+			return
+		}
+	}
+	r.in.Discard(r.in.Buffered())
 }
 
 // rune은 첫 바이트를 받은 뒤 나머지를 마저 읽어 글자 하나를 만든다.
