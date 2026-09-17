@@ -26,7 +26,7 @@ func TestMoveCursorStopsAtBothEnds(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		c = MoveCursor(c, KeyDown, nil, st)
 	}
-	if got, want := c.Index, len(leftEntries(st))-1; got != want {
+	if got, want := c.Index, len(leftEntries(st, nil))-1; got != want {
 		t.Errorf("맨 아래 = %d, 기대 %d", got, want)
 	}
 }
@@ -82,6 +82,18 @@ func TestClampCursorAfterPacksDisappear(t *testing.T) {
 	}
 	if _, ok := MenuKeyAt(nil, Status{}, c); !ok {
 		t.Error("들여놓은 자리인데 고를 수 없다")
+	}
+}
+
+func TestDrillStartSaysWhichPackItOpens(t *testing.T) {
+	// 자료실이 여러 줄이면 「맨 위」가 어느 팩인지 눌러 보기 전에는 모른다.
+	out := RenderMenu(packs(3), Status{}, 100, Cursor{})
+	if !strings.Contains(out, "1. 드릴 시작 (41)") {
+		t.Errorf("어느 팩을 여는지 안 적혀 있다:\n%s", out)
+	}
+	// 팩이 없으면 붙일 번호도 없다.
+	if out := RenderMenu(nil, Status{}, 100, Cursor{}); strings.Contains(out, "드릴 시작 (") {
+		t.Errorf("팩이 없는데 번호가 붙었다:\n%s", out)
 	}
 }
 
