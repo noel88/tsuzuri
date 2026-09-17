@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/noel88/tsuzuri/internal/analyze"
 	"github.com/noel88/tsuzuri/internal/pack"
@@ -16,11 +17,19 @@ import (
 // fbterm에서 기본 ANSI(ESC[2J, ESC[H)는 동작한다 — M0에서 글리프와 함께
 // 확인했다. 혹시 어긋나는 터미널이 있으면 TSUZURI_NO_CLEAR=1로 끌 수 있다.
 func Clear(w io.Writer) {
-	if os.Getenv("TSUZURI_NO_CLEAR") != "" {
+	if !ClearEnabled() {
 		fmt.Fprintln(w)
 		return
 	}
 	fmt.Fprint(w, "\033[2J\033[H")
+}
+
+// ClearEnabled는 화면을 지우는지 알려준다.
+//
+// 지우는 동안에는 방금 띄운 메시지가 다음 화면에 덮여 사라진다. 부르는
+// 쪽은 이것을 보고 읽을 틈을 줄지 정한다.
+func ClearEnabled() bool {
+	return os.Getenv("TSUZURI_NO_CLEAR") == ""
 }
 
 // Status는 화면 하단·상단에 표시할 현재 상태다.
@@ -29,7 +38,12 @@ type Status struct {
 	Total    int  // 전체 문제 수
 	QueueLen int  // 첨삭 대기 건수
 	Feedback int  // 받은 첨삭 건수
+	Due      int  // 복습할 문제 수
 	Online   bool // 네트워크 연결 여부
+
+	// Now는 「며칠 뒤」를 계산할 기준 시각이다. 비면 time.Now를 쓴다.
+	// 테스트가 화면을 고정된 시각으로 그리기 위해 받는다.
+	Now time.Time
 }
 
 // RenderProblem은 답안 입력 전 화면이다.
@@ -39,7 +53,7 @@ func RenderProblem(p pack.Problem, st Status, termW int) string {
 	w := BoxWidth(termW)
 
 	var lines []string
-	lines = append(lines, Frame(problemTitle(p), progress(st), w)...)
+	lines = append(lines, Frame(problemTitle(p), indexLabel(st), w)...)
 	lines = append(lines, "")
 	lines = append(lines, wrapIndent(p.Prompt, w-4, "  ")...)
 	lines = append(lines, "")
@@ -61,7 +75,7 @@ func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, 
 	inner := w - 4
 
 	var lines []string
-	lines = append(lines, Frame(problemTitle(p), progress(st), w)...)
+	lines = append(lines, Frame(problemTitle(p), indexLabel(st), w)...)
 	lines = append(lines, "")
 	lines = append(lines, wrapIndent(p.Prompt, inner, "  ")...)
 	lines = append(lines, "")
@@ -78,7 +92,7 @@ func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, 
 	lines = append(lines, "")
 	lines = append(lines, CommandBarWith(
 		fmt.Sprintf("큐 %d건 · %s", st.QueueLen, connLabel(st.Online)),
-		"주요명령(다음 ⏎, 첨삭 F, 다시 R)  메뉴(M)  종료(X)",
+		"주요명령(다음 ⏎, 첨삭 F, 다시 R, 복습 B)  메뉴(M)  종료(X)",
 		"선택 >>", w)...)
 
 	return Page(lines, termW, w)
@@ -136,7 +150,7 @@ func problemTitle(p pack.Problem) string {
 	return strings.Join(parts, "   ")
 }
 
-func progress(st Status) string {
+func indexLabel(st Status) string {
 	if st.Total <= 0 {
 		return ""
 	}

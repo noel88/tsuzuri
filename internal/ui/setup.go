@@ -102,7 +102,7 @@ func ParseSetupAnswer(field, input string, c config.Config) (config.Config, erro
 	// 실기에서 topic 의 마지막 글자가 세 바이트 중 한 바이트만 남은 채로
 	// 저장된 적이 있다. fbterm 의 한글 입력기가 조합 중인 글자를 확정하기
 	// 전에 Enter 가 들어가면 그렇게 된다. 그 한 바이트 때문에 TOML 파싱이
-	// 실패하고, 설정을 읽어야 하는 5·6번이 통째로 막힌다. 여기서 막으면
+	// 실패하고, 설정을 읽어야 하는 온라인 기능이 통째로 막힌다. 여기서 막으면
 	// 사용자는 한 줄 다시 치면 되지만, 통과시키면 파일을 손으로 고쳐야 한다.
 	if !utf8.ValidString(input) {
 		return c, fmt.Errorf("입력한 글자가 깨졌습니다. 한글을 조합하던 중에 Enter를 누르면 " +

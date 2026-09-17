@@ -72,3 +72,27 @@ func TestRenderMenuFitsTerminalWithLongLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderMenuShowsReviewCount(t *testing.T) {
+	// 복습할 것이 있는지를 들어가 보지 않고도 알아야 한다.
+	out := RenderMenu(nil, Status{Due: 7}, 100)
+	if !strings.Contains(out, "복습 드릴 (7)") {
+		t.Errorf("초기화면에 복습 건수가 없다:\n%s", out)
+	}
+	// 없으면 (0)을 달지 않는다 — 할 일이 없다는 뜻이 숫자로 보일 필요가 없다.
+	out = RenderMenu(nil, Status{}, 100)
+	if strings.Contains(out, "복습 드릴 (") {
+		t.Errorf("복습할 것이 없는데 건수가 붙었다:\n%s", out)
+	}
+}
+
+func TestRenderMenuMarksNetworkItems(t *testing.T) {
+	// 번호가 바뀌면 이 안내도 같이 바뀌어야 한다. 틀리면 오프라인에서
+	// 네트워크가 필요한 항목을 누르게 된다.
+	out := RenderMenu(nil, Status{}, 100)
+	for _, want := range []string{"8. 팩 받기", "9. 첨삭 받기", "8·9는 네트워크 필요"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("초기화면에 %q가 없다:\n%s", want, out)
+		}
+	}
+}

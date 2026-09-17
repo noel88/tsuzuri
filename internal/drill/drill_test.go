@@ -10,6 +10,7 @@ import (
 
 	"github.com/noel88/tsuzuri/internal/analyze"
 	"github.com/noel88/tsuzuri/internal/pack"
+	"github.com/noel88/tsuzuri/internal/progress"
 	"github.com/noel88/tsuzuri/internal/store"
 )
 
@@ -214,5 +215,54 @@ func TestRunQueuesBeforeShowingResult(t *testing.T) {
 	}
 	if queue[0].AttemptID != attempts[0].ID {
 		t.Errorf("큐가 그 답안을 가리켜야 한다: %q vs %q", queue[0].AttemptID, attempts[0].ID)
+	}
+}
+
+func TestRunStartsFromGivenIndex(t *testing.T) {
+	// 이어하기. 이미 푼 문제를 다시 내면 「이어한다」가 아니다.
+	dir := t.TempDir()
+	s, out := newSession(t, dir, "雨が降る。\nx\n")
+	s.Start = 1
+
+	if _, err := s.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "어제 카페에 갔다.") {
+		t.Error("이미 푼 문제를 다시 냈다")
+	}
+	if !strings.Contains(out.String(), "비가 온다.") {
+		t.Errorf("이어할 문제가 안 나왔다:\n%s", out.String())
+	}
+}
+
+func TestRunOutOfRangeStartFallsBackToBeginning(t *testing.T) {
+	// 팩이 줄었는데 저장된 위치가 그대로면 아무것도 못 푼다.
+	dir := t.TempDir()
+	s, out := newSession(t, dir, "昨日カフェに行った。\nx\n")
+	s.Start = 99
+
+	if _, err := s.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "어제 카페에 갔다.") {
+		t.Error("범위를 벗어난 위치면 처음부터 내야 한다")
+	}
+}
+
+func TestRunRecordsReviewMark(t *testing.T) {
+	// 결과 화면의 B. 첨삭이 조용히 넘어간 문제라도 스스로 다시 볼 수 있어야 한다.
+	dir := t.TempDir()
+	s, _ := newSession(t, dir, "昨日カフェに行った。\nb\nx\n")
+
+	if _, err := s.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	marks, err := store.ReadAll[progress.Mark](filepath.Join(dir, "marks.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(marks) != 1 || marks[0].ProblemID != "p001" || marks[0].Kind != progress.KindFlag {
+		t.Errorf("복습 표시가 안 남았다: %+v", marks)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/noel88/tsuzuri/internal/analyze"
 	"github.com/noel88/tsuzuri/internal/pack"
+	"github.com/noel88/tsuzuri/internal/progress"
 	"github.com/noel88/tsuzuri/internal/store"
 	"github.com/noel88/tsuzuri/internal/ui"
 )
@@ -35,6 +36,9 @@ type Session struct {
 	TermW    int
 	Online   bool // 마지막 온라인 작업이 성공했는지. 화면 상태 표시에 쓴다.
 	Now      func() time.Time
+
+	// Start는 몇 번째 문제부터 낼지다 (0부터). 이어하기에 쓴다.
+	Start int
 }
 
 // Run은 문제를 순서대로 출제하고 답안과 분석 결과를 저장한다.
@@ -48,6 +52,7 @@ func (s *Session) Run() (Outcome, error) {
 
 	attemptsPath := filepath.Join(s.DataDir, "attempts.jsonl")
 	queuePath := filepath.Join(s.DataDir, "queue.jsonl")
+	marksPath := filepath.Join(s.DataDir, "marks.jsonl")
 
 	queued, err := store.ReadAll[store.QueueItem](queuePath)
 	if err != nil {
@@ -55,7 +60,11 @@ func (s *Session) Run() (Outcome, error) {
 	}
 	queueLen := len(queued)
 
-	for i := 0; i < len(s.Problems); {
+	start := s.Start
+	if start < 0 || start >= len(s.Problems) {
+		start = 0
+	}
+	for i := start; i < len(s.Problems); {
 		p := s.Problems[i]
 		st := ui.Status{Index: i + 1, Total: len(s.Problems), QueueLen: queueLen, Online: s.Online}
 
@@ -120,6 +129,18 @@ func (s *Session) Run() (Outcome, error) {
 			return OutcomeDone, err
 		}
 		cmd := ui.ParseCommand(cmdLine)
+
+		// B는 복습 표시다. 첨삭이 조용히 넘어간 것이라도 스스로 다시 보고
+		// 싶을 때가 있다 — 답은 맞았지만 자신이 없었던 문장 같은 것.
+		if cmd == ui.CmdMark {
+			if err := store.Append(marksPath, progress.Mark{
+				ProblemID: p.ID,
+				At:        at,
+				Kind:      progress.KindFlag,
+			}); err != nil {
+				return OutcomeDone, err
+			}
+		}
 
 		// F는 우선 처리 표시다. 큐는 append-only이므로 같은 답안에 대해
 		// 우선 표시를 한 줄 더 남긴다. sync가 답안 단위로 합친다.

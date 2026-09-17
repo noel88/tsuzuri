@@ -79,7 +79,10 @@ func MenuItem(no, label string, ruleW int) []string {
 //
 //  41. ko2ja  N3 일상            47
 func Entry(no, label, value string, w int) string {
-	head := "  " + no + ". " + label
+	head := "  " + label
+	if no != "" {
+		head = "  " + no + ". " + label
+	}
 	if value == "" {
 		return Truncate(head, w)
 	}
@@ -91,6 +94,13 @@ func Entry(no, label, value string, w int) string {
 		gap = 1
 	}
 	return head + strings.Repeat(" ", gap) + value
+}
+
+// Row는 번호 없는 한 줄이다. 이름은 왼쪽, 수치는 오른쪽 끝.
+//
+//	연속                                    12일
+func Row(label, value string, w int) string {
+	return Entry("", label, value, w)
 }
 
 // TwoCol은 두 칼럼을 나란히 놓는다. 짧은 쪽은 빈 줄로 채운다.
