@@ -290,12 +290,7 @@ func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 		a.showDone = !a.showDone
 		return false, nil
 	case "1":
-		// 「드릴 시작」은 자료실 첫 팩을 뜻한다.
-		if len(sets) == 0 {
-			a.notice("아직 팩이 없습니다. 8번으로 받으세요.")
-			return false, nil
-		}
-		return a.drill(sets[0])
+		return a.startDrill(sets)
 	case "2":
 		return a.resume(sets)
 	case "3":
@@ -319,6 +314,33 @@ func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 		return false, nil
 	}
 	return a.drill(set)
+}
+
+// startDrill은 「드릴 시작」이다. 아직 안 끝낸 첫 팩의, 아직 안 푼 첫
+// 문제부터 낸다.
+//
+// 자료실 맨 위 팩을 무조건 여는 것이 아니다. 그 팩을 이미 다 풀었으면
+// 열어 봐야 같은 문제를 다시 만난다 — 「시작」이라는 말과 맞지 않는다.
+func (a *app) startDrill(sets []packSet) (bool, error) {
+	if len(sets) == 0 {
+		a.notice("아직 팩이 없습니다. 8번으로 받으세요.")
+		return false, nil
+	}
+	solved, err := a.solvedByProblem()
+	if err != nil {
+		return false, err
+	}
+	for _, set := range sets {
+		for i, pr := range set.problems {
+			if solved[pr.ID] {
+				continue
+			}
+			return a.drillFrom(set.problems, set.dir, i, set.key)
+		}
+	}
+	// 모두 다 풀었다. 처음부터 다시 낸다.
+	a.notice("자료실의 팩을 전부 풀었습니다. 첫 팩을 처음부터 다시 냅니다.")
+	return a.drill(sets[0])
 }
 
 func (a *app) drill(set packSet) (bool, error) {
@@ -486,12 +508,23 @@ const doneToggleKey = "0"
 // 접어 두되 없애지는 않는다. 다시 풀고 싶을 때가 있고, 지운 것이 아니라
 // 접어 둔 것임을 알 수 있어야 한다.
 func (a *app) archive(sets []packSet, solved map[string]bool) []ui.Choice {
+	// 전부 끝냈으면 접지 않는다. 접으면 자료실이 통째로 비어 「드릴 시작」이
+	// 가리킬 줄이 없어진다.
+	allDone := true
+	for _, s := range sets {
+		if !s.finished(solved) {
+			allDone = false
+			break
+		}
+	}
+	fold := !a.showDone && !allDone
+
 	out := make([]ui.Choice, 0, len(sets)+1)
 	done := 0
 	for _, s := range sets {
 		if s.finished(solved) {
 			done++
-			if !a.showDone {
+			if fold {
 				continue
 			}
 			out = append(out, ui.Choice{Key: s.key, Label: s.label(), Value: "완료"})

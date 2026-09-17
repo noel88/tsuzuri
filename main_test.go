@@ -147,3 +147,14 @@ func TestArchiveHasNoToggleWhenNothingFinished(t *testing.T) {
 		t.Errorf("끝낸 팩이 없는데 줄이 늘었다: %+v", got)
 	}
 }
+
+func TestArchiveShowsEverythingWhenAllDone(t *testing.T) {
+	// 전부 끝냈는데 접으면 자료실이 통째로 비고, 「드릴 시작」이 가리킬
+	// 줄이 없어진다.
+	a := &app{}
+	sets := []packSet{{key: "41", problems: []pack.Problem{{ID: "a1"}}}}
+	got := a.archive(sets, map[string]bool{"a1": true})
+	if len(got) == 0 || got[0].Key != "41" {
+		t.Errorf("전부 끝냈더니 자료실이 비었다: %+v", got)
+	}
+}
