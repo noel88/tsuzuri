@@ -37,13 +37,21 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 		rightW = 20
 	}
 
+	review := "복습 드릴"
+	if st.Due > 0 {
+		review = fmt.Sprintf("복습 드릴 (%d)", st.Due)
+	}
+
 	var left []string
 	left = append(left, MenuItem("1", "드릴 시작", 22)...)
-	left = append(left, MenuItem("2", "복습", 22)...)
-	left = append(left, MenuItem("3", "내보내기", 22)...)
-	left = append(left, MenuItem("4", "설정", 22)...)
-	left = append(left, MenuItem("5", "팩 받기", 22)...)
-	left = append(left, MenuItem("6", "첨삭 받기", 22)...)
+	left = append(left, MenuItem("2", "이어하기", 22)...)
+	left = append(left, MenuItem("3", review, 22)...)
+	left = append(left, MenuItem("4", "첨삭 보기", 22)...)
+	left = append(left, MenuItem("5", "진도", 22)...)
+	left = append(left, MenuItem("6", "내보내기", 22)...)
+	left = append(left, MenuItem("7", "설정", 22)...)
+	left = append(left, MenuItem("8", "팩 받기", 22)...)
+	left = append(left, MenuItem("9", "첨삭 받기", 22)...)
 
 	var right []string
 	right = append(right, Box("자 료 실")...)
@@ -58,7 +66,7 @@ func RenderMenu(choices []Choice, st Status, termW int) string {
 	lines = append(lines, "")
 	lines = append(lines, CommandBarWith(
 		fmt.Sprintf("첨삭 큐 %d건 · %s", st.QueueLen, connLabel(st.Online)),
-		"주요명령(이동 번호)  5·6은 네트워크 필요  종료(X)",
+		"주요명령(이동 번호)  8·9는 네트워크 필요  종료(X)",
 		"선택 >>", w)...)
 
 	return Page(lines, termW, w)

@@ -15,7 +15,7 @@ func RenderFeedback(p pack.Problem, a store.Attempt, f tsync.Feedback, st Status
 	inner := w - 4
 
 	var lines []string
-	lines = append(lines, Frame(problemTitle(p), progress(st), w)...)
+	lines = append(lines, Frame(problemTitle(p), indexLabel(st), w)...)
 	lines = append(lines, "")
 	lines = append(lines, wrapIndent(p.Prompt, inner, "  ")...)
 	lines = append(lines, "")

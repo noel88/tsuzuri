@@ -16,6 +16,7 @@ const (
 	CmdNext     Command = iota // Enter — 다음 문제
 	CmdPriority                // F — 첨삭 우선 처리 표시
 	CmdRetry                   // R — 같은 문제 다시 풀기
+	CmdMark                    // B — 복습 목록에 넣기
 	CmdMenu                    // M — 메뉴로
 	CmdQuit                    // X — 종료
 )
@@ -47,6 +48,8 @@ func ParseCommand(s string) Command {
 		return CmdPriority
 	case "r":
 		return CmdRetry
+	case "b":
+		return CmdMark
 	case "m":
 		return CmdMenu
 	case "x", "q":

@@ -1,7 +1,7 @@
 // Command tsuzuri는 포메라 DM250에서 오프라인으로 도는
 // 한↔일 양방향 번역 작문 드릴이다.
 //
-// 네트워크는 팩을 받을 때(5)와 첨삭을 받을 때(6)만 쓴다.
+// 네트워크는 팩을 받을 때(8)와 첨삭을 받을 때(9)만 쓴다.
 package main
 
 import (
@@ -24,6 +24,7 @@ import (
 	"github.com/noel88/tsuzuri/internal/gen"
 	"github.com/noel88/tsuzuri/internal/llm"
 	"github.com/noel88/tsuzuri/internal/pack"
+	"github.com/noel88/tsuzuri/internal/progress"
 	"github.com/noel88/tsuzuri/internal/store"
 	tsync "github.com/noel88/tsuzuri/internal/sync"
 	"github.com/noel88/tsuzuri/internal/ui"
@@ -48,6 +49,9 @@ type app struct {
 
 	// 이미 알린 팩 경로. 같은 경고를 메뉴마다 반복하지 않는다.
 	warned map[string]bool
+
+	// 아직 사용자가 읽지 않은 메시지가 화면에 있는지.
+	noticed bool
 
 	// 사전은 한 번에 하나만 상주시킨다.
 	//
@@ -159,6 +163,9 @@ func (a *app) run() error {
 		if quit || eof {
 			return nil
 		}
+		if a.pause() {
+			return nil
+		}
 	}
 }
 
@@ -166,14 +173,20 @@ func (a *app) run() error {
 func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	switch key {
 	case "2":
-		return a.review()
+		return a.resume(sets)
 	case "3":
-		return false, a.export()
+		return a.reviewDrill()
 	case "4":
-		return false, a.setup()
+		return a.review()
 	case "5":
-		return false, a.fetchPack()
+		return a.stats()
 	case "6":
+		return false, a.export()
+	case "7":
+		return false, a.setup()
+	case "8":
+		return false, a.fetchPack()
+	case "9":
 		return false, a.fetchFeedback()
 	}
 	set, found := findSet(sets, key)
@@ -185,13 +198,19 @@ func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 }
 
 func (a *app) drill(set packSet) (bool, error) {
-	az, err := a.analyzerFor(set.dir)
+	return a.drillFrom(set.problems, set.dir, 0)
+}
+
+// drillFrom은 주어진 문제들을 start번째부터 낸다.
+func (a *app) drillFrom(problems []pack.Problem, dir pack.Direction, start int) (bool, error) {
+	az, err := a.analyzerFor(dir)
 	if err != nil {
 		return false, err
 	}
 
 	s := &drill.Session{
-		Problems: set.problems,
+		Problems: problems,
+		Start:    start,
 		Analyzer: az,
 		DataDir:  a.dataDir,
 		In:       a.in,
@@ -293,6 +312,12 @@ const gotoEnv = "TSUZURI_GOTO"
 // 성공하면 돌아오지 않는다. exec가 프로세스 이미지를 교체하므로
 // 이전 사전이 차지하던 메모리는 OS가 회수한다.
 func (a *app) restartFor(d pack.Direction) error {
+	key, _ := a.keyForDir(d)
+	return a.restartTo(d, key)
+}
+
+// restartTo는 다시 실행한 뒤 gotoKey 화면을 연다.
+func (a *app) restartTo(d pack.Direction, gotoKey string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("방향을 바꾸려면 앱을 다시 실행해야 합니다: %w", err)
@@ -300,8 +325,8 @@ func (a *app) restartFor(d pack.Direction) error {
 	a.notice(fmt.Sprintf("방향이 바뀌어 다시 시작합니다 (%s → %s)...", a.analyzerDir, d))
 
 	env := os.Environ()
-	if key, ok := a.keyForDir(d); ok {
-		env = append(env, gotoEnv+"="+key)
+	if gotoKey != "" {
+		env = append(env, gotoEnv+"="+gotoKey)
 	}
 	if err := syscall.Exec(self, os.Args, env); err != nil {
 		return fmt.Errorf("다시 실행하지 못했습니다. 앱을 끄고 다시 켜 주세요: %w", err)
@@ -323,6 +348,155 @@ func (a *app) keyForDir(d pack.Direction) (string, bool) {
 	return "", false
 }
 
+// resume은 마지막으로 푼 문제의 다음부터 이어 낸다.
+//
+// 어디까지 했는지를 따로 저장하지 않는다. 마지막 답안이 곧 그 자리다 —
+// 따로 저장하면 전원이 끊긴 자리에서 둘이 어긋난다.
+func (a *app) resume(sets []packSet) (bool, error) {
+	attempts, err := store.ReadAll[store.Attempt](filepath.Join(a.dataDir, "attempts.jsonl"))
+	if err != nil {
+		return false, err
+	}
+	last, ok := progress.LastPack(attempts)
+	if !ok {
+		a.notice("아직 푼 문제가 없습니다. 1번으로 시작하세요.")
+		return false, nil
+	}
+
+	for _, set := range sets {
+		for i, p := range set.problems {
+			if p.ID != last {
+				continue
+			}
+			if i+1 >= len(set.problems) {
+				a.notice(fmt.Sprintf("%s 팩은 끝까지 풀었습니다. 처음부터 다시 냅니다.", set.label()))
+				return a.drillFrom(set.problems, set.dir, 0)
+			}
+			return a.drillFrom(set.problems, set.dir, i+1)
+		}
+	}
+	a.notice("마지막으로 푼 문제가 있던 팩이 보이지 않습니다. 팩을 지웠다면 1번으로 새로 시작하세요.")
+	return false, nil
+}
+
+// reviewDrill은 복습할 문제만 모아서 낸다.
+//
+// 목록은 첨삭에서 오류가 나온 문제와 사용자가 B로 표시한 문제다.
+// 맞혔는지는 다음 첨삭이 판정한다 — 스스로 채점하게 하지 않는다.
+func (a *app) reviewDrill() (bool, error) {
+	cards, _, _, err := a.progressData()
+	if err != nil {
+		return false, err
+	}
+	due := progress.Due(cards)
+	if len(due) == 0 {
+		a.notice("복습할 문제가 없습니다.\n" +
+			"  첨삭에서 오류가 나온 문제와, 결과 화면에서 B로 표시한 문제가 여기 모입니다.")
+		return false, nil
+	}
+
+	byID, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
+	if err != nil {
+		return false, err
+	}
+	a.reportSkipped(skipped)
+
+	// 방향별로 나눈다. 한 회차에 두 방향을 섞을 수 없다 — 사전이 하나뿐이다.
+	groups := map[pack.Direction][]pack.Problem{}
+	for _, id := range due {
+		if p, ok := byID[id]; ok {
+			groups[p.Dir] = append(groups[p.Dir], p)
+		}
+	}
+	if len(groups) == 0 {
+		a.notice("복습할 문제가 있던 팩이 보이지 않습니다. 팩을 지웠다면 그 문제는 낼 수 없습니다.")
+		return false, nil
+	}
+
+	dir := a.reviewDir(groups)
+	// 이미 열어 둔 사전과 방향이 다르면 다시 실행한다. 돌아온 뒤 곧바로
+	// 이 화면을 다시 연다 — 사용자가 메뉴에서 3을 또 누르게 하지 않는다.
+	if a.analyzer != nil && a.analyzerDir != dir {
+		return false, a.restartTo(dir, "3")
+	}
+
+	quit, err := a.drillFrom(groups[dir], dir, 0)
+	if err != nil || quit {
+		return quit, err
+	}
+	// 남은 방향은 회차가 끝난 뒤에 알린다. 드릴이 화면을 지우므로 먼저
+	// 띄우면 읽을 새도 없이 덮인다.
+	if other := len(due) - len(groups[dir]); other > 0 {
+		a.notice(fmt.Sprintf("다른 방향에 복습할 문제가 %d개 남았습니다. 3번을 다시 고르면 그쪽을 냅니다.", other))
+	}
+	return false, nil
+}
+
+// reviewDir은 이번 복습 회차의 방향을 고른다.
+//
+// 이미 읽어 둔 사전이 있으면 그쪽을 먼저 쓴다. 방향을 바꾸면 사전을 다시
+// 읽어야 하고 그것이 실기에서 16.5초와 39초다 — 복습 두 개를 풀자고
+// 치를 값이 아니다. 열어 둔 사전에 낼 것이 없을 때만 바꾼다.
+func (a *app) reviewDir(groups map[pack.Direction][]pack.Problem) pack.Direction {
+	if a.analyzer != nil && len(groups[a.analyzerDir]) > 0 {
+		return a.analyzerDir
+	}
+	best, n := pack.KoToJa, -1
+	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
+		if len(groups[d]) > n {
+			best, n = d, len(groups[d])
+		}
+	}
+	return best
+}
+
+// stats는 진도 화면이다.
+func (a *app) stats() (bool, error) {
+	cards, attempts, feedback, err := a.progressData()
+	if err != nil {
+		return false, err
+	}
+	now := time.Now()
+	s := progress.Summarize(attempts, feedback, cards, now)
+
+	labels := map[string]string{}
+	if byID, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs")); err == nil {
+		a.reportSkipped(skipped)
+		for id, p := range byID {
+			labels[id] = ui.Truncate(p.Prompt, 40)
+		}
+	}
+
+	ui.Clear(a.out)
+	fmt.Fprint(a.out, ui.RenderStats(s, cards, labels, ui.Status{Online: a.online, Now: now}, a.termW))
+
+	line, eof, err := ui.ReadLine(a.in)
+	if err != nil {
+		return false, err
+	}
+	if eof || ui.ParseCommand(line) == ui.CmdQuit {
+		return true, nil
+	}
+	return false, nil
+}
+
+// progressData는 진도 계산에 필요한 것을 한 번에 읽는다.
+func (a *app) progressData() ([]progress.Card, []store.Attempt, []tsync.Feedback, error) {
+	attempts, err := store.ReadAll[store.Attempt](filepath.Join(a.dataDir, "attempts.jsonl"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	feedback, err := store.ReadAll[tsync.Feedback](filepath.Join(a.dataDir, "feedback.jsonl"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	marks, err := store.ReadAll[progress.Mark](filepath.Join(a.dataDir, "marks.jsonl"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return progress.Cards(attempts, feedback, marks, time.Now()), attempts, feedback, nil
+}
+
 // review는 받은 첨삭을 순서대로 보여준다.
 func (a *app) review() (bool, error) {
 	feedback, err := store.ReadAll[tsync.Feedback](filepath.Join(a.dataDir, "feedback.jsonl"))
@@ -330,7 +504,7 @@ func (a *app) review() (bool, error) {
 		return false, err
 	}
 	if len(feedback) == 0 {
-		a.notice("받은 첨삭이 없습니다. 6번으로 첨삭을 받아 오세요.")
+		a.notice("받은 첨삭이 없습니다. 9번으로 첨삭을 받아 오세요.")
 		return false, nil
 	}
 
@@ -596,7 +770,7 @@ func (a *app) fetchFeedback() error {
 	}
 	switch {
 	case res.Processed > 0:
-		a.notice(fmt.Sprintf("%d건의 첨삭을 받았습니다. 2번에서 볼 수 있습니다.", res.Processed))
+		a.notice(fmt.Sprintf("%d건의 첨삭을 받았습니다. 4번에서 볼 수 있습니다.", res.Processed))
 	case res.Failed == 0 && res.Missing == 0:
 		a.notice("처리할 항목이 없습니다.")
 	}
@@ -668,7 +842,21 @@ func (a *app) status(sets []packSet) (ui.Status, error) {
 	for _, s := range sets {
 		total += len(s.problems)
 	}
-	return ui.Status{Total: total, QueueLen: len(queue), Feedback: len(feedback), Online: a.online}, nil
+
+	// 복습할 것이 몇 개인지는 초기화면에서 보여야 한다. 들어가 봐야 알면
+	// 「오늘 할 게 있나」를 확인하려고 매번 그 화면을 열게 된다.
+	cards, _, _, err := a.progressData()
+	if err != nil {
+		return ui.Status{}, err
+	}
+
+	return ui.Status{
+		Total:    total,
+		QueueLen: len(queue),
+		Feedback: len(feedback),
+		Due:      len(progress.Due(cards)),
+		Online:   a.online,
+	}, nil
 }
 
 // reportSkipped는 읽지 못한 팩을 알린다. 같은 파일을 두 번 알리지 않는다.
@@ -686,7 +874,29 @@ func (a *app) reportSkipped(skipped []pack.Skip) {
 }
 
 func (a *app) notice(msg string) {
-	fmt.Fprintf(a.out, "\n  %s\n\n", msg)
+	fmt.Fprintf(a.out, "\n  %s\n", msg)
+	a.noticed = true
+}
+
+// pause는 화면을 지우기 전에 읽을 틈을 준다.
+//
+// 화면 지우기를 넣은 뒤로, 메시지를 띄우고 곧바로 다음 화면을 그리면
+// 그 메시지가 덮여 사라진다. 「저장했습니다」나 오류 문구를 아무도 못 읽는다.
+// 화면을 지우지 않는 설정이면 메시지가 그대로 남으므로 멈추지 않는다.
+//
+// 입력이 끝났으면(EOF) true를 돌려준다 — 그러지 않으면 메뉴가 빈 입력을
+// 계속 받아 되돌아오며 무한히 돈다.
+func (a *app) pause() bool {
+	if !a.noticed {
+		return false
+	}
+	a.noticed = false
+	if !ui.ClearEnabled() {
+		return false
+	}
+	fmt.Fprint(a.out, "\n  계속하려면 Enter >> ")
+	_, eof, err := ui.ReadLine(a.in)
+	return eof || err != nil
 }
 
 func findSet(sets []packSet, key string) (packSet, bool) {
