@@ -278,3 +278,41 @@ func TestGeneratePromptDemandsLiteralKeyPoints(t *testing.T) {
 		t.Errorf("핵심 표현이 reference에 그대로 있어야 함을 명시해야 한다:\n%s", f.Got.System)
 	}
 }
+
+func TestLengthMixSplitsEvenly(t *testing.T) {
+	for _, count := range []int{1, 2, 3, 10, 20, 25, 50} {
+		s, m, l := lengthMix(count)
+		if s+m+l != count {
+			t.Errorf("%d문항 = %d+%d+%d, 합이 안 맞는다", count, s, m, l)
+		}
+		if s < 0 || m < 0 || l < 0 {
+			t.Errorf("%d문항에서 음수가 나왔다: %d %d %d", count, s, m, l)
+		}
+		// 어느 하나가 나머지보다 둘 이상 많으면 섞인 것이 아니다.
+		max, min := s, s
+		for _, v := range []int{m, l} {
+			if v > max {
+				max = v
+			}
+			if v < min {
+				min = v
+			}
+		}
+		if max-min > 1 {
+			t.Errorf("%d문항 배분이 치우쳤다: 단문 %d 중문 %d 장문 %d", count, s, m, l)
+		}
+	}
+}
+
+func TestLengthOfSortsByPromptLength(t *testing.T) {
+	cases := map[string]string{
+		"비가 온다.": "단문",
+		"어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.":             "중문",
+		"요즘 계속 바빠서 방 청소를 할 기력도 없어. 방이 점점 더 지저분해지고 있어.": "장문",
+	}
+	for prompt, want := range cases {
+		if got := LengthOf(prompt); got != want {
+			t.Errorf("LengthOf(%q) = %q, 기대 %q", prompt, got, want)
+		}
+	}
+}

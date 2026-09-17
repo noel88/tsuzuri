@@ -842,9 +842,28 @@ func (a *app) fetchPack() error {
 		if err != nil {
 			return err
 		}
-		a.notice(fmt.Sprintf("%d문항을 받았습니다: %s", len(ps), filepath.Base(path)))
+		a.notice(fmt.Sprintf("%d문항을 받았습니다 (%s): %s",
+			len(ps), lengthSummary(ps), filepath.Base(path)))
 	}
 	return nil
+}
+
+// lengthSummary는 받은 팩의 길이 배분을 알린다.
+//
+// 요청한 배분이 지켜졌는지 사용자가 볼 수 있어야 한다. 모델이 어긋나게
+// 내도 그 자리에서 알 수 있고, 어긋난 팩을 계속 받을 이유가 없다.
+func lengthSummary(ps []pack.Problem) string {
+	n := map[string]int{}
+	for _, p := range ps {
+		n[gen.LengthOf(p.Prompt)]++
+	}
+	var parts []string
+	for _, k := range []string{"단문", "중문", "장문"} {
+		if n[k] > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", k, n[k]))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // share는 총 문항 수를 방향 수만큼 나눈다. 나머지는 앞쪽이 가진다.
