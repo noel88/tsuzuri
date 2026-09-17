@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/noel88/tsuzuri/internal/config"
+	"github.com/noel88/tsuzuri/internal/pack"
 )
 
 // SetupFields는 설정 화면의 항목 순서다. 번호가 곧 인덱스+1이다.
@@ -71,18 +72,6 @@ func maskKey(k string) string {
 	return k[:10] + "…"
 }
 
-// normalizeLevel은 "2"처럼 N을 뺀 입력을 "N2"로 고친다.
-//
-// 레벨은 자유 문자열이라 무엇이든 받지만, 그 값이 그대로 생성 프롬프트에
-// 들어간다. "2"만 적힌 채로 팩을 받으면 엉뚱한 난이도가 나오고, 그 호출은
-// 이미 과금된 뒤다. 실기 설정 파일에 level = "2"가 들어 있었다.
-func normalizeLevel(s string) string {
-	if len(s) == 1 && s[0] >= '1' && s[0] <= '5' {
-		return "N" + s
-	}
-	return s
-}
-
 func orDash(s string) string {
 	if s == "" {
 		return "(없음)"
@@ -114,7 +103,7 @@ func ParseSetupAnswer(field, input string, c config.Config) (config.Config, erro
 	case "model":
 		c.Model = input
 	case "level":
-		c.Level = normalizeLevel(input)
+		c.Level = pack.NormalizeLevel(input)
 	case "topic":
 		c.Topic = input
 	case "pack_size":

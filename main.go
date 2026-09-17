@@ -77,42 +77,57 @@ func newApp() *app {
 	}
 }
 
-// packSet은 한 방향의 문제 묶음이다. 초기화면의 자료실 항목 하나에 대응한다.
+// packSet은 팩 파일 하나다. 초기화면의 자료실 항목 하나에 대응한다.
+//
+// 방향별로 묶지 않고 파일별로 둔다. 방향으로 묶으면 자료실 한 줄이 그
+// 방향의 모든 팩을 뭉뚱그리게 되고, 레벨과 주제가 섞여 나온다 — 실기에서
+// N2로 받은 팩이 시작 팩과 합쳐져 「2·N3」으로 보였다. 사용자는 그 줄을
+// 「방금 받은 팩」으로 읽는데 실제로는 「이 방향의 전부」였다.
 type packSet struct {
 	key      string
 	dir      pack.Direction
+	source   string
 	problems []pack.Problem
 }
 
 func (p packSet) label() string {
-	levels, topics := map[string]bool{}, map[string]bool{}
-	for _, pr := range p.problems {
-		if pr.Level != "" {
-			levels[pr.Level] = true
-		}
-		if pr.Topic != "" {
-			topics[pr.Topic] = true
-		}
-	}
-	return fmt.Sprintf("%s  %s %s", p.dir, joinKeys(levels), joinKeys(topics))
+	return fmt.Sprintf("%s  %s  %s", p.dir, one(p.levels(), "여러 레벨"), one(p.topics(), "여러 주제"))
 }
 
-func joinKeys(m map[string]bool) string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
+func (p packSet) levels() []string {
+	return uniq(p.problems, func(pr pack.Problem) string { return pr.Level })
+}
+func (p packSet) topics() []string {
+	return uniq(p.problems, func(pr pack.Problem) string { return pr.Topic })
+}
+
+// one은 값이 하나뿐이면 그것을, 여러 개면 대신할 말을 돌려준다.
+//
+// 값을 두어 개 이어 붙여 보여주면 그 줄이 팩 전체를 말하는 것처럼 읽힌다.
+// 25문항이 스물두 가지 주제를 담고 있으면 앞의 둘은 대표가 아니다.
+func one(vs []string, many string) string {
+	switch len(vs) {
+	case 0:
+		return "-"
+	case 1:
+		return vs[0]
+	default:
+		return many
 	}
-	sort.Strings(ks)
-	if len(ks) > 2 {
-		ks = append(ks[:2:2], "…")
-	}
-	out := ""
-	for i, k := range ks {
-		if i > 0 {
-			out += "·"
+}
+
+func uniq(ps []pack.Problem, key func(pack.Problem) string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range ps {
+		v := key(p)
+		if v == "" || seen[v] {
+			continue
 		}
-		out += k
+		seen[v] = true
+		out = append(out, v)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -665,6 +680,9 @@ func (a *app) fetchPack() error {
 	if strings.TrimSpace(level) == "" {
 		level = c.Level
 	}
+	// 설정 화면과 같은 규칙으로 고친다. 여기서 안 고치면 "2" 가 그대로
+	// 생성 프롬프트에 들어가고 팩에도 그렇게 박힌다.
+	level = pack.NormalizeLevel(strings.TrimSpace(level))
 
 	fmt.Fprintf(a.out, "  주제 (기본 %s)%s >> ", orNone(c.Topic), cancelHint)
 	topic, eof, err := ui.ReadLine(a.in)
@@ -704,7 +722,7 @@ func (a *app) fetchPack() error {
 	for i, dir := range dirs {
 		spec := gen.Spec{
 			Dir:   dir,
-			Level: strings.TrimSpace(level),
+			Level: level,
 			Topic: strings.TrimSpace(topic),
 			Count: share(count, len(dirs), i),
 		}
@@ -818,13 +836,25 @@ func (a *app) loadPackSets() ([]packSet, error) {
 			return nil, err
 		}
 		a.reportSkipped(skipped)
-		if len(ps) == 0 {
-			continue
+
+		// 같은 파일에서 온 것끼리 묶는다. LoadDir이 파일 순서대로 주므로
+		// 자리는 매번 같다 — 어제 41이던 팩이 오늘 43이 되면 안 된다.
+		for i := 0; i < len(ps); {
+			j := i
+			for j < len(ps) && ps[j].Source == ps[i].Source {
+				j++
+			}
+			// 키는 방향 인덱스가 아니라 세트 인덱스로 매긴다.
+			// 방향 인덱스로 매기면 ko2ja 팩이 없을 때 첫 세트가 42가 되는데,
+			// ParseMenuKey는 「1. 드릴 시작」을 41로 보내므로 메뉴가 죽는다.
+			sets = append(sets, packSet{
+				key:      strconv.Itoa(41 + len(sets)),
+				dir:      d,
+				source:   ps[i].Source,
+				problems: ps[i:j],
+			})
+			i = j
 		}
-		// 키는 방향 인덱스가 아니라 세트 인덱스로 매긴다.
-		// 방향 인덱스로 매기면 ko2ja 팩이 없을 때 첫 세트가 42가 되는데,
-		// ParseMenuKey는 「1. 드릴 시작」을 41로 보내므로 메뉴가 죽는다.
-		sets = append(sets, packSet{key: strconv.Itoa(41 + len(sets)), dir: d, problems: ps})
 	}
 	return sets, nil
 }
