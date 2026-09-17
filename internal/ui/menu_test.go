@@ -96,3 +96,12 @@ func TestRenderMenuMarksNetworkItems(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderMenuTellsHowToGetPacks(t *testing.T) {
+	// 팩이 하나도 없을 때 할 수 있는 일을 말해야 한다. 기기 앞에 앉은
+	// 사람에게 파일 경로는 쓸모가 없다 — 셸로 나갈 수 있어야 쓰는 말이다.
+	out := RenderMenu(nil, Status{}, 100)
+	if !strings.Contains(out, "8번으로 받으세요") {
+		t.Errorf("팩이 없을 때 안내가 없다:\n%s", out)
+	}
+}
