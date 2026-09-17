@@ -190,11 +190,11 @@ func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	case "2":
 		return a.resume(sets)
 	case "3":
-		return a.reviewDrill()
+		return a.reviewDrill(sets)
 	case "4":
-		return a.review()
+		return a.review(sets)
 	case "5":
-		return a.stats()
+		return a.stats(sets)
 	case "6":
 		return false, a.export()
 	case "7":
@@ -363,6 +363,20 @@ func (a *app) keyForDir(d pack.Direction) (string, bool) {
 	return "", false
 }
 
+// known은 지금 자료실에 있는 문제를 ID로 찾을 수 있게 모은다.
+//
+// 팩 파일은 사용자가 지울 수 있다. 지운 팩의 문제는 답안이 남아 있어도
+// 다시 낼 수 없고 첨삭을 보여줄 수도 없다 — 제시문이 그 파일에 있었다.
+func known(sets []packSet) map[string]pack.Problem {
+	out := map[string]pack.Problem{}
+	for _, s := range sets {
+		for _, p := range s.problems {
+			out[p.ID] = p
+		}
+	}
+	return out
+}
+
 // resume은 마지막으로 푼 문제의 다음부터 이어 낸다.
 //
 // 어디까지 했는지를 따로 저장하지 않는다. 마지막 답안이 곧 그 자리다 —
@@ -398,8 +412,8 @@ func (a *app) resume(sets []packSet) (bool, error) {
 //
 // 목록은 첨삭에서 오류가 나온 문제와 사용자가 B로 표시한 문제다.
 // 맞혔는지는 다음 첨삭이 판정한다 — 스스로 채점하게 하지 않는다.
-func (a *app) reviewDrill() (bool, error) {
-	cards, _, _, err := a.progressData()
+func (a *app) reviewDrill(sets []packSet) (bool, error) {
+	cards, _, _, err := a.progressData(sets)
 	if err != nil {
 		return false, err
 	}
@@ -410,22 +424,13 @@ func (a *app) reviewDrill() (bool, error) {
 		return false, nil
 	}
 
-	byID, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
-	if err != nil {
-		return false, err
-	}
-	a.reportSkipped(skipped)
-
 	// 방향별로 나눈다. 한 회차에 두 방향을 섞을 수 없다 — 사전이 하나뿐이다.
+	byID := known(sets)
 	groups := map[pack.Direction][]pack.Problem{}
 	for _, id := range due {
 		if p, ok := byID[id]; ok {
 			groups[p.Dir] = append(groups[p.Dir], p)
 		}
-	}
-	if len(groups) == 0 {
-		a.notice("복습할 문제가 있던 팩이 보이지 않습니다. 팩을 지웠다면 그 문제는 낼 수 없습니다.")
-		return false, nil
 	}
 
 	dir := a.reviewDir(groups)
@@ -466,8 +471,8 @@ func (a *app) reviewDir(groups map[pack.Direction][]pack.Problem) pack.Direction
 }
 
 // stats는 진도 화면이다.
-func (a *app) stats() (bool, error) {
-	cards, attempts, feedback, err := a.progressData()
+func (a *app) stats(sets []packSet) (bool, error) {
+	cards, attempts, feedback, err := a.progressData(sets)
 	if err != nil {
 		return false, err
 	}
@@ -475,11 +480,8 @@ func (a *app) stats() (bool, error) {
 	s := progress.Summarize(attempts, feedback, cards, now)
 
 	labels := map[string]string{}
-	if byID, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs")); err == nil {
-		a.reportSkipped(skipped)
-		for id, p := range byID {
-			labels[id] = ui.TruncateMark(p.Prompt, 40)
-		}
+	for id, p := range known(sets) {
+		labels[id] = ui.TruncateMark(p.Prompt, 40)
 	}
 
 	ui.Clear(a.out)
@@ -496,7 +498,11 @@ func (a *app) stats() (bool, error) {
 }
 
 // progressData는 진도 계산에 필요한 것을 한 번에 읽는다.
-func (a *app) progressData() ([]progress.Card, []store.Attempt, []tsync.Feedback, error) {
+//
+// 자료실에 없는 문제의 카드는 버린다. 팩을 지우면 그 문제는 낼 수 없는데,
+// 세기만 하면 초기화면이 「복습 드릴 (1)」이라고 해 놓고 들어가면 낼 것이
+// 없다고 답하게 된다.
+func (a *app) progressData(sets []packSet) ([]progress.Card, []store.Attempt, []tsync.Feedback, error) {
 	attempts, err := store.ReadAll[store.Attempt](filepath.Join(a.dataDir, "attempts.jsonl"))
 	if err != nil {
 		return nil, nil, nil, err
@@ -509,11 +515,18 @@ func (a *app) progressData() ([]progress.Card, []store.Attempt, []tsync.Feedback
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return progress.Cards(attempts, feedback, marks, time.Now()), attempts, feedback, nil
+	byID := known(sets)
+	var cards []progress.Card
+	for _, c := range progress.Cards(attempts, feedback, marks, time.Now()) {
+		if _, ok := byID[c.ProblemID]; ok {
+			cards = append(cards, c)
+		}
+	}
+	return cards, attempts, feedback, nil
 }
 
 // review는 받은 첨삭을 순서대로 보여준다.
-func (a *app) review() (bool, error) {
+func (a *app) review(sets []packSet) (bool, error) {
 	feedback, err := store.ReadAll[tsync.Feedback](filepath.Join(a.dataDir, "feedback.jsonl"))
 	if err != nil {
 		return false, err
@@ -531,23 +544,44 @@ func (a *app) review() (bool, error) {
 	for _, at := range attempts {
 		byID[at.ID] = at
 	}
-	problems, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs"))
-	if err != nil {
-		return false, err
-	}
-	a.reportSkipped(skipped)
+	problems := known(sets)
 
-	for i, f := range feedback {
+	// 보여줄 수 있는 것만 먼저 고른다.
+	//
+	// 걸러 놓고 세지 않으면 「3건 중 2번째」처럼 있지도 않은 번호가 뜬다.
+	// 하나도 못 보여줄 때 조용히 메뉴로 돌아가는 것도 여기서 막는다 —
+	// 「받은 첨삭 1건」이라고 써 놓고 눌러도 아무 일이 없으면 고장으로 읽힌다.
+	type shown struct {
+		f  tsync.Feedback
+		at store.Attempt
+		p  pack.Problem
+	}
+	var list []shown
+	dropped := 0
+	for _, f := range feedback {
 		at, ok := byID[f.AttemptID]
 		if !ok {
+			dropped++
 			continue
 		}
 		p, ok := problems[at.PackID]
 		if !ok {
 			// 팩이 사라졌다. 제시문 없이 첨삭만 보여주면 맥락이 없다.
+			dropped++
 			continue
 		}
-		st := ui.Status{Index: i + 1, Total: len(feedback), Online: a.online}
+		list = append(list, shown{f, at, p})
+	}
+	if dropped > 0 {
+		a.notice(fmt.Sprintf("%d건은 문제를 찾지 못해 건너뜁니다. 팩을 지우면 그 첨삭은 볼 수 없습니다.", dropped))
+	}
+	if len(list) == 0 {
+		return false, nil
+	}
+
+	for i, it := range list {
+		f, at, p := it.f, it.at, it.p
+		st := ui.Status{Index: i + 1, Total: len(list), Online: a.online}
 		ui.Clear(a.out)
 		fmt.Fprint(a.out, ui.RenderFeedback(p, at, f, st, a.termW))
 
@@ -875,7 +909,7 @@ func (a *app) status(sets []packSet) (ui.Status, error) {
 
 	// 복습할 것이 몇 개인지는 초기화면에서 보여야 한다. 들어가 봐야 알면
 	// 「오늘 할 게 있나」를 확인하려고 매번 그 화면을 열게 된다.
-	cards, _, _, err := a.progressData()
+	cards, _, _, err := a.progressData(sets)
 	if err != nil {
 		return ui.Status{}, err
 	}
