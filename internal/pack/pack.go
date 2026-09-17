@@ -35,6 +35,10 @@ const (
 // 오프라인 분석이 이것에 의존하므로, 온라인 호출 한 번으로 수백 문제어치의
 // 채점 지능을 미리 확보하는 구조다.
 type Problem struct {
+	// Source는 이 문제가 들어 있던 팩 파일이다. 파일에는 없고 읽을 때 채운다.
+	// 자료실이 팩 단위로 보이려면 문제가 어느 팩에서 왔는지 알아야 한다.
+	Source string `json:"-"`
+
 	ID        string    `json:"id"`
 	Dir       Direction `json:"dir"`
 	Level     string    `json:"level"`
@@ -44,6 +48,22 @@ type Problem struct {
 	KeyPoints []string  `json:"key_points"`
 	Traps     []string  `json:"traps"`
 	Style     Style     `json:"style"`
+}
+
+// NormalizeLevel은 "2"처럼 N을 뺀 레벨을 "N2"로 고친다.
+//
+// 레벨은 자유 문자열이라 무엇이든 받지만, 그 값이 그대로 생성 프롬프트에
+// 들어가고 자료실에도 그대로 보인다. "2" 하나만 적힌 채로 팩을 받으면
+// 엉뚱한 난이도가 나오는데, 알아차릴 때는 이미 과금된 뒤다. 실기에서
+// level = "2" 로 50문항을 받은 적이 있다.
+//
+// 읽을 때도 고친다. 이미 "2" 로 받아 둔 팩이 자료실에서 "2" 로 보이면
+// 사용자는 자기가 N2를 고른 것이 무시됐다고 읽는다.
+func NormalizeLevel(s string) string {
+	if len(s) == 1 && s[0] >= '1' && s[0] <= '5' {
+		return "N" + s
+	}
+	return s
 }
 
 // Skip은 읽지 못해 건너뛴 팩 파일이다.
@@ -91,6 +111,8 @@ func Load(path string) ([]Problem, error) {
 		if err := json.Unmarshal([]byte(text), &p); err != nil {
 			return nil, fmt.Errorf("%s %d번째 줄: %w", path, line, err)
 		}
+		p.Source = path
+		p.Level = NormalizeLevel(p.Level)
 		out = append(out, p)
 	}
 	if err := sc.Err(); err != nil {

@@ -223,3 +223,35 @@ func TestLoadStripsUTF8BOM(t *testing.T) {
 		t.Errorf("Load = %+v", got)
 	}
 }
+
+func TestLoadNormalizesLevelAndRecordsSource(t *testing.T) {
+	// 실기에서 level = "2" 로 50문항을 받은 적이 있다. 자료실에 "2" 로
+	// 보이면 사용자는 자기가 고른 N2가 무시됐다고 읽는다.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.jsonl")
+	line := `{"id":"x1","dir":"ko2ja","level":"2","topic":"가족","prompt":"가","reference":"あ"}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps[0].Level != "N2" {
+		t.Errorf("level = %q, 기대 \"N2\"", ps[0].Level)
+	}
+	if ps[0].Source != path {
+		t.Errorf("source = %q, 어느 팩에서 왔는지 알아야 자료실이 팩 단위로 보인다", ps[0].Source)
+	}
+}
+
+func TestNormalizeLevelLeavesEverythingElse(t *testing.T) {
+	for in, want := range map[string]string{
+		"2": "N2", "5": "N5", "N3": "N3", "초급": "초급", "": "", "12": "12", "6": "6",
+	} {
+		if got := NormalizeLevel(in); got != want {
+			t.Errorf("NormalizeLevel(%q) = %q, 기대 %q", in, got, want)
+		}
+	}
+}
