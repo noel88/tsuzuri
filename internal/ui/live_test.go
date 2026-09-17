@@ -30,6 +30,6 @@ func TestLiveScreen(t *testing.T) {
 		"昨日初めて行ったカフェが思ったより静かで、長く座っていた。",
 	} {
 		fmt.Printf("\n### 결과 화면 — 답안: %s\n", ans)
-		fmt.Print(RenderResult(p, ans, az.Analyze(p, ans), st, 92))
+		fmt.Print(RenderResult(p, ans, az.Analyze(p, ans), st, 92, 0))
 	}
 }

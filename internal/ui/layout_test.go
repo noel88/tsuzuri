@@ -124,8 +124,8 @@ func TestScreensEndOnThePromptLine(t *testing.T) {
 	// 스크린샷을 찍어 보고서야 드러났다.
 	screens := map[string]string{
 		"출제":   RenderProblem(sampleProblem(), sampleStatus(), 92),
-		"결과":   RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92),
-		"초기화면": RenderMenu([]Choice{{Key: "41", Label: "ko2ja  N3 일상", Value: "2"}}, Status{}, 92),
+		"결과":   RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92, 0),
+		"초기화면": RenderMenu([]Choice{{Key: "41", Label: "ko2ja  N3 일상", Value: "2"}}, Status{}, 92, Cursor{}),
 		"설정":   RenderSetup(config.Default(), Status{}, 92),
 	}
 	for name, out := range screens {

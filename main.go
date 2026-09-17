@@ -53,6 +53,13 @@ type app struct {
 	// 아직 사용자가 읽지 않은 메시지가 화면에 있는지.
 	noticed bool
 
+	// 초기화면에서 화살표가 가리키는 자리. 화면을 다녀와도 그 자리가
+	// 남아 있어야 한다 — 매번 맨 위로 돌아가면 같은 곳을 반복해서 못 간다.
+	cursor ui.Cursor
+
+	// 키를 하나씩 읽는 읽개. 화살표를 쓸 수 없는 입력이면 비어 있다.
+	keys *ui.KeyReader
+
 	// 사전은 한 번에 하나만 상주시킨다.
 	//
 	// 측정: 일본어(IPADIC) 88MB + 한국어(ko-dic) 211MB = 300MB 라이브 힙.
@@ -67,7 +74,7 @@ func newApp() *app {
 	if dataDir == "" {
 		dataDir = "."
 	}
-	return &app{
+	a := &app{
 		dataDir:    dataDir,
 		configPath: filepath.Join(dataDir, "config.toml"),
 		termW:      ui.TermWidth(),
@@ -75,6 +82,10 @@ func newApp() *app {
 		out:        os.Stdout,
 		warned:     map[string]bool{},
 	}
+	if ui.Interactive() {
+		a.keys = ui.NewKeyReader(os.Stdin)
+	}
+	return a
 }
 
 // packSet은 팩 파일 하나다. 초기화면의 자료실 항목 하나에 대응한다.
@@ -156,16 +167,9 @@ func (a *app) run() error {
 		}
 		key, eof := pending, false
 		if pending == "" {
-			ui.Clear(a.out)
-			fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW))
-
-			line, isEOF, err := ui.ReadLine(a.in)
-			if err != nil {
-				return err
-			}
-			eof = isEOF
 			var ok bool
-			if key, ok = ui.ParseMenuKey(line); !ok {
+			key, eof, ok = a.chooseMenu(choices, st)
+			if !ok {
 				return nil
 			}
 		}
@@ -180,6 +184,76 @@ func (a *app) run() error {
 		}
 		if a.pause() {
 			return nil
+		}
+	}
+}
+
+// chooseMenu는 초기화면을 그리고 어디로 갈지 고르게 한다.
+//
+// 화살표로 옮기고 Enter로 고르거나, 번호를 쳐서 바로 간다. 둘 다 남겨 둔
+// 것은 자료실 번호가 두 자리여서 키 하나로는 고를 수 없기 때문이고,
+// 기기에서 화살표가 안 먹히더라도 앱을 쓸 수 있어야 하기 때문이다.
+func (a *app) chooseMenu(choices []ui.Choice, st ui.Status) (key string, eof, ok bool) {
+	if a.keys == nil {
+		ui.Clear(a.out)
+		fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW, a.cursor))
+		line, isEOF, err := ui.ReadLine(a.in)
+		if err != nil {
+			return "", true, false
+		}
+		k, cont := ui.ParseMenuKey(line)
+		return k, isEOF, cont
+	}
+
+	// typed는 지금까지 친 번호다. 치는 동안 프롬프트 뒤에 보여 준다.
+	typed := ""
+	for {
+		a.cursor = ui.ClampCursor(a.cursor, choices, st)
+		ui.Clear(a.out)
+		fmt.Fprint(a.out, ui.RenderMenu(choices, st, a.termW, a.cursor), typed)
+
+		k, err := a.keys.Read()
+		if err != nil {
+			// raw mode가 안 되는 터미널이다. 한 줄 읽기로 물러난다.
+			line, isEOF, err := ui.ReadLine(a.in)
+			if err != nil {
+				return "", true, false
+			}
+			kk, cont := ui.ParseMenuKey(line)
+			return kk, isEOF, cont
+		}
+
+		switch k.Key {
+		case ui.KeyQuit:
+			return "", true, false
+		case ui.KeyUp, ui.KeyDown, ui.KeyLeft, ui.KeyRight:
+			// 번호를 치던 중에 화살표를 누르면 치던 것을 버린다.
+			// 마음을 바꾼 것이지 두 가지를 섞으려는 것이 아니다.
+			typed = ""
+			a.cursor = ui.MoveCursor(a.cursor, k.Key, choices, st)
+		case ui.KeyEnter:
+			if typed != "" {
+				kk, cont := ui.ParseMenuKey(typed)
+				return kk, false, cont
+			}
+			if kk, found := ui.MenuKeyAt(choices, st, a.cursor); found {
+				return kk, false, true
+			}
+		case ui.KeyEscape:
+			typed = ""
+		case ui.KeyRune:
+			switch {
+			case k.Rune == 0x7f || k.Rune == 0x08: // 지우기
+				if typed != "" {
+					typed = typed[:len(typed)-1]
+				}
+			case k.Rune >= '0' && k.Rune <= '9':
+				typed += string(k.Rune)
+			default:
+				if kk, cont := ui.ParseMenuKey(string(k.Rune)); !cont {
+					return kk, false, false
+				}
+			}
 		}
 	}
 }
@@ -232,6 +306,7 @@ func (a *app) drillFrom(problems []pack.Problem, dir pack.Direction, start int) 
 		Out:      a.out,
 		TermW:    a.termW,
 		Online:   a.online,
+		Keys:     os.Stdin,
 	}
 	outcome, err := s.Run()
 	if err != nil {

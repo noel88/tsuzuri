@@ -70,7 +70,7 @@ func RenderProblem(p pack.Problem, st Status, termW int) string {
 // 점수도 정오 판정도 없다 (스펙 §5.4).
 // ✓ ✗ ⚠ 는 오답 표시가 아니라 확인 요청이다.
 // 짚을 것이 없는 줄은 아예 그리지 않는다.
-func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, termW int) string {
+func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, termW int, sel int) string {
 	w := BoxWidth(termW)
 	inner := w - 4
 
@@ -92,7 +92,7 @@ func RenderResult(p pack.Problem, answer string, a analyze.Analysis, st Status, 
 	lines = append(lines, "")
 	lines = append(lines, CommandBarWith(
 		fmt.Sprintf("큐 %d건 · %s", st.QueueLen, connLabel(st.Online)),
-		"주요명령(다음 ⏎, 첨삭 F, 다시 R, 복습 B)  메뉴(M)  종료(X)",
+		ActionBar(ResultActions, sel),
 		"선택 >>", w)...)
 
 	return Page(lines, termW, w)

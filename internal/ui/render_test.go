@@ -57,7 +57,7 @@ func TestRenderProblemHidesReference(t *testing.T) {
 
 func TestRenderResultShowsAnswerAndReference(t *testing.T) {
 	out := RenderResult(sampleProblem(), "昨日初めて行ったカフェは静かくて、ずっと座ってました。",
-		noisyAnalysis(), sampleStatus(), 92)
+		noisyAnalysis(), sampleStatus(), 92, 0)
 
 	for _, want := range []string{
 		"静かくて", "思ったより", "初めて", "な형용사", "ずっと", "12건", "오프라인", "정중체",
@@ -69,7 +69,7 @@ func TestRenderResultShowsAnswerAndReference(t *testing.T) {
 }
 
 func TestRenderResultShowsReferenceAfterPrompt(t *testing.T) {
-	out := RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92)
+	out := RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92, 0)
 	pi := strings.Index(out, "어제 처음 간")
 	ri := strings.Index(out, "참조:")
 	if pi < 0 || ri < 0 {
@@ -81,7 +81,7 @@ func TestRenderResultShowsReferenceAfterPrompt(t *testing.T) {
 }
 
 func TestRenderResultHasNoVerdictWords(t *testing.T) {
-	out := RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92)
+	out := RenderResult(sampleProblem(), "답안", noisyAnalysis(), sampleStatus(), 92, 0)
 	for _, banned := range []string{"점수", "정답", "오답", "score", "%"} {
 		if strings.Contains(out, banned) {
 			t.Errorf("판정 표현 %q가 화면에 나오면 안 된다 (스펙 §5.4):\n%s", banned, out)
@@ -91,7 +91,7 @@ func TestRenderResultHasNoVerdictWords(t *testing.T) {
 
 func TestRenderResultQuietWhenNothingToFlag(t *testing.T) {
 	quiet := analyze.Analysis{Covered: []string{"初めて"}, LenRatio: 1.0}
-	out := RenderResult(sampleProblem(), "답안", quiet, sampleStatus(), 92)
+	out := RenderResult(sampleProblem(), "답안", quiet, sampleStatus(), 92, 0)
 
 	if strings.Contains(out, "⚠") {
 		t.Errorf("짚을 게 없으면 ⚠ 줄이 없어야 한다:\n%s", out)
@@ -106,7 +106,7 @@ func TestRenderResultQuietWhenNothingToFlag(t *testing.T) {
 
 func TestRenderResultCompletelyQuiet(t *testing.T) {
 	// 커버된 것도 없고 짚을 것도 없으면 지적 블록 자체가 없다.
-	out := RenderResult(sampleProblem(), "답안", analyze.Analysis{}, sampleStatus(), 92)
+	out := RenderResult(sampleProblem(), "답안", analyze.Analysis{}, sampleStatus(), 92, 0)
 	if strings.Contains(out, "✓") || strings.Contains(out, "✗") || strings.Contains(out, "⚠") {
 		t.Errorf("지적 블록이 통째로 없어야 한다:\n%s", out)
 	}
@@ -115,7 +115,7 @@ func TestRenderResultCompletelyQuiet(t *testing.T) {
 func TestRenderKeepsLineWidthWithinTerminal(t *testing.T) {
 	for _, termW := range []int{60, 76, 92, 120} {
 		out := RenderResult(sampleProblem(), "昨日初めて行ったカフェは静かくて、ずっと座ってました。",
-			noisyAnalysis(), sampleStatus(), termW)
+			noisyAnalysis(), sampleStatus(), termW, 0)
 		for _, line := range strings.Split(out, "\n") {
 			if Width(line) > termW {
 				t.Errorf("폭 %d에서 줄이 넘친다 (%d칸): %q", termW, Width(line), line)
@@ -185,7 +185,7 @@ func TestLabeledIndentsEveryLineOfMultilineAnswer(t *testing.T) {
 func TestRenderResultFitsTerminalWithMultilineAnswer(t *testing.T) {
 	answer := "내일은 비가 올 거예요.\n그리고 바람도 불 거예요.\n우산을 챙기세요."
 	for _, termW := range []int{60, 76, 92} {
-		out := RenderResult(sampleProblem(), answer, noisyAnalysis(), sampleStatus(), termW)
+		out := RenderResult(sampleProblem(), answer, noisyAnalysis(), sampleStatus(), termW, 0)
 		for _, line := range strings.Split(out, "\n") {
 			if Width(line) > termW {
 				t.Errorf("폭 %d에서 넘친다 (%d칸): %q", termW, Width(line), line)

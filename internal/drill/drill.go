@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,6 +40,14 @@ type Session struct {
 
 	// Start는 몇 번째 문제부터 낼지다 (0부터). 이어하기에 쓴다.
 	Start int
+
+	// Keys는 키를 하나씩 읽을 입력이다. 비면 예전처럼 한 줄씩 읽는다.
+	//
+	// In과 따로 두는 것은 raw mode가 파일 서술자에 거는 것이라서다.
+	// 테스트와 캡처 도구는 여기를 비워 두고 In으로만 넣는다.
+	Keys *os.File
+
+	keys *ui.KeyReader
 }
 
 // Run은 문제를 순서대로 출제하고 답안과 분석 결과를 저장한다.
@@ -48,6 +57,9 @@ func (s *Session) Run() (Outcome, error) {
 	}
 	if s.TermW <= 0 {
 		s.TermW = ui.TermWidth()
+	}
+	if s.Keys != nil && ui.Interactive() {
+		s.keys = ui.NewKeyReader(s.Keys)
 	}
 
 	attemptsPath := filepath.Join(s.DataDir, "attempts.jsonl")
@@ -121,14 +133,10 @@ func (s *Session) Run() (Outcome, error) {
 		queueLen++
 		st.QueueLen = queueLen
 
-		ui.Clear(s.Out)
-		fmt.Fprint(s.Out, ui.RenderResult(p, answer, a, st, s.TermW))
-
-		cmdLine, cmdEOF, err := ui.ReadLine(s.In)
+		cmd, cmdEOF, err := s.readResultCommand(p, answer, a, st)
 		if err != nil {
 			return OutcomeDone, err
 		}
-		cmd := ui.ParseCommand(cmdLine)
 
 		// B는 복습 표시다. 첨삭이 조용히 넘어간 것이라도 스스로 다시 보고
 		// 싶을 때가 있다 — 답은 맞았지만 자신이 없었던 문장 같은 것.
@@ -169,6 +177,56 @@ func (s *Session) Run() (Outcome, error) {
 		}
 	}
 	return OutcomeDone, nil
+}
+
+// readResultCommand는 결과 화면을 그리고 다음 동작을 고르게 한다.
+//
+// 키를 하나씩 읽을 수 있으면 좌우 화살표로 고르고, 아니면 예전처럼 한 줄을
+// 읽는다. 파이프로 입력을 넣는 자리(캡처 도구, 스크립트)가 그 경로로 돈다.
+func (s *Session) readResultCommand(p pack.Problem, answer string, a analyze.Analysis, st ui.Status) (ui.Command, bool, error) {
+	draw := func(sel int) {
+		ui.Clear(s.Out)
+		fmt.Fprint(s.Out, ui.RenderResult(p, answer, a, st, s.TermW, sel))
+	}
+
+	if s.keys == nil {
+		draw(0)
+		line, eof, err := ui.ReadLine(s.In)
+		if err != nil {
+			return ui.CmdNext, eof, err
+		}
+		return ui.ParseCommand(line), eof, nil
+	}
+
+	sel := 0
+	for {
+		draw(sel)
+		k, err := s.keys.Read()
+		if err != nil {
+			// raw mode가 안 되는 터미널이다. 한 줄 읽기로 물러난다.
+			line, eof, err := ui.ReadLine(s.In)
+			if err != nil {
+				return ui.CmdNext, eof, err
+			}
+			return ui.ParseCommand(line), eof, nil
+		}
+		switch k.Key {
+		case ui.KeyQuit:
+			return ui.CmdQuit, true, nil
+		case ui.KeyEnter:
+			return ui.ActionAt(ui.ResultActions, sel), false, nil
+		case ui.KeyLeft, ui.KeyRight:
+			sel = ui.MoveAction(sel, k.Key, len(ui.ResultActions))
+		case ui.KeyEscape:
+			return ui.CmdMenu, false, nil
+		case ui.KeyRune:
+			// 글자 키도 그대로 받는다. 입력기가 켜져 있으면 글자가
+			// 조합으로 먹히는데, 그때는 화살표가 대신한다.
+			if cmd := ui.ParseCommand(string(k.Rune)); cmd != ui.CmdNext {
+				return cmd, false, nil
+			}
+		}
+	}
 }
 
 // readAnswer는 답안 한 줄을 읽되, ":e"면 에디터를 연다.
