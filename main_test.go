@@ -86,3 +86,24 @@ func TestShareSplitsCountAcrossDirections(t *testing.T) {
 		t.Errorf("share = %d, 최소 한 문항은 줘야 한다", got)
 	}
 }
+
+func TestPackProgressCountsDistinctProblems(t *testing.T) {
+	// 팩은 다 풀어도 자료실에서 사라지지 않는다. 어디까지 왔는지를
+	// 문항 수 자리에 적어 주지 않으면 화면만 봐서는 알 수 없다.
+	set := packSet{problems: []pack.Problem{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}}}
+
+	if got := set.progress(nil); got != "0/3" {
+		t.Errorf("아직 안 푼 팩 = %q", got)
+	}
+	// 같은 문제를 여러 번 풀어도 하나로 센다.
+	if got := set.progress(map[string]bool{"p1": true, "p2": true}); got != "2/3" {
+		t.Errorf("progress = %q, 기대 \"2/3\"", got)
+	}
+	if got := set.progress(map[string]bool{"p1": true, "p2": true, "p3": true}); got != "3/3" {
+		t.Errorf("다 푼 팩 = %q", got)
+	}
+	// 다른 팩의 문제는 세지 않는다.
+	if got := set.progress(map[string]bool{"다른팩/p1": true}); got != "0/3" {
+		t.Errorf("progress = %q — 다른 팩을 셌다", got)
+	}
+}

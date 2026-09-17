@@ -101,6 +101,21 @@ type packSet struct {
 	problems []pack.Problem
 }
 
+// progress는 「푼 것/전체」다.
+//
+// 팩은 다 풀어도 자료실에서 사라지지 않는다 — 다시 풀 수 있어야 하기
+// 때문이다. 그러면 어느 팩이 끝났는지 화면만 봐서는 알 수 없으므로,
+// 문항 수 자리에 진도를 적는다.
+func (p packSet) progress(solved map[string]bool) string {
+	n := 0
+	for _, pr := range p.problems {
+		if solved[pr.ID] {
+			n++
+		}
+	}
+	return fmt.Sprintf("%d/%d", n, len(p.problems))
+}
+
 func (p packSet) label() string {
 	return fmt.Sprintf("%s  %s  %s", p.dir, one(p.levels(), "여러 레벨"), one(p.topics(), "여러 주제"))
 }
@@ -157,12 +172,16 @@ func (a *app) run() error {
 			return err
 		}
 
+		solved, err := a.solvedByProblem()
+		if err != nil {
+			return err
+		}
 		choices := make([]ui.Choice, 0, len(sets))
 		for _, s := range sets {
 			choices = append(choices, ui.Choice{
 				Key:   s.key,
 				Label: s.label(),
-				Value: strconv.Itoa(len(s.problems)),
+				Value: s.progress(solved),
 			})
 		}
 		key, eof := pending, false
@@ -428,6 +447,22 @@ func (a *app) restartTo(d pack.Direction, gotoKey string) error {
 		return fmt.Errorf("다시 실행하지 못했습니다. 앱을 끄고 다시 켜 주세요: %w", err)
 	}
 	return nil // 도달하지 않는다
+}
+
+// solvedByProblem은 한 번이라도 답한 문제를 모은다.
+//
+// 같은 문제를 여러 번 풀어도 하나로 센다. 진도는 「얼마나 많이 쳤는가」가
+// 아니라 「어디까지 왔는가」다.
+func (a *app) solvedByProblem() (map[string]bool, error) {
+	attempts, err := store.ReadAll[store.Attempt](filepath.Join(a.dataDir, "attempts.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(attempts))
+	for _, at := range attempts {
+		out[at.PackID] = true
+	}
+	return out, nil
 }
 
 // known은 지금 자료실에 있는 문제를 ID로 찾을 수 있게 모은다.
