@@ -43,7 +43,16 @@ func Write(dataDir string, now time.Time) (string, int, error) {
 	}
 
 	var b strings.Builder
-	line := func(s string) { b.WriteString(s + "\r\n") }
+	// 순정 포메라는 CRLF 로 줄을 나눈다. 값 안에 든 줄바꿈까지 바꿔야 한다.
+	//
+	// 답안은 편집기로 쓰면 여러 줄이고 — 장문 문항은 반드시 그렇다 — 첨삭의
+	// 까닭도 여러 문장이다. 맨 LF 하나가 섞이면 순정 포메라가 그 뒤를 전부
+	// 한 줄로 읽는다.
+	line := func(s string) {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+		b.WriteString(strings.ReplaceAll(s, "\n", "\r\n") + "\r\n")
+	}
 
 	line("Tsuzuri 복습 노트")
 	line(now.Format("2006-01-02 15:04"))

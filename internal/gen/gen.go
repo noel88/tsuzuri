@@ -107,9 +107,12 @@ func lengthMix(count int) (short, mid, long int) {
 }
 
 // Generate는 문제 팩을 만든다.
-func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error) {
+// 두 번째 반환값은 버리거나 고친 문항의 사유다. 부르는 쪽이 사용자에게
+// 알린다 — 50문항을 요청하고 38문항을 받았는데 이유를 모르면, 같은 금액을
+// 또 쓰면서 같은 일이 반복된다.
+func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, []string, error) {
 	if s.Count <= 0 {
-		return nil, fmt.Errorf("문항 수가 0 이하입니다: %d", s.Count)
+		return nil, nil, fmt.Errorf("문항 수가 0 이하입니다: %d", s.Count)
 	}
 	short, mid, long := lengthMix(s.Count)
 	user := fmt.Sprintf(
@@ -126,19 +129,20 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 		Schema:    problemSchema,
 		Required:  []string{"problems"},
 		MaxTokens: 64000,
+		TruncHint: "문항 수를 줄여 보세요. 장문이 섞이면 한 문항이 길어집니다.",
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var out struct {
 		Problems []pack.Problem `json:"problems"`
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("응답을 해석하지 못했습니다: %w", err)
+		return nil, nil, fmt.Errorf("응답을 해석하지 못했습니다: %w", err)
 	}
 	if len(out.Problems) == 0 {
-		return nil, fmt.Errorf("문항이 하나도 오지 않았습니다")
+		return nil, nil, fmt.Errorf("문항이 하나도 오지 않았습니다")
 	}
 	// 문항 하나가 불량이라고 팩 전체를 버리지 않는다. 이미 값을 치른
 	// 생성 결과이므로, 쓸 수 있는 것은 살리고 몇 개를 버렸는지 알린다.
@@ -155,6 +159,13 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 			bad = append(bad, fmt.Sprintf("%d번째(모범답안에 없는 핵심 표현 %d개 제거: %s)",
 				i+1, len(dropped), strings.Join(dropped, " / ")))
 		}
+		if len(p.KeyPoints) == 0 {
+			// 핵심 표현이 하나도 안 남으면 채점할 근거가 없다. 그 문항은
+			// 드릴에서 아무것도 짚지 못하고 조용히 지나간다 — 검증은
+			// 통과했는데 쓸모가 없는 문항이다.
+			bad = append(bad, fmt.Sprintf("%d번째(채점 근거가 남지 않음)", i+1))
+			continue
+		}
 		if seen[p.ID] {
 			bad = append(bad, fmt.Sprintf("%d번째(id %q 중복)", i+1, p.ID))
 			continue
@@ -163,9 +174,9 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 		kept = append(kept, p)
 	}
 	if len(kept) == 0 {
-		return nil, fmt.Errorf("쓸 수 있는 문항이 없습니다: %s", strings.Join(bad, ", "))
+		return nil, nil, fmt.Errorf("쓸 수 있는 문항이 없습니다: %s", strings.Join(bad, ", "))
 	}
-	return kept, nil
+	return kept, bad, nil
 }
 
 func directionLabel(d pack.Direction) string {
@@ -269,11 +280,17 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 		path = filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", base, n))
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	// 최종 이름에 바로 쓰지 않는다.
+	//
+	// 쓰는 도중에 전원이 끊기면 packs/ 안에 잘린 팩이 남는다. 방금 값을
+	// 치른 팩이고, 그 상태를 앱 안에서 고칠 방법이 없다. 임시 이름으로
+	// 다 쓰고 디스크에 내린 뒤에 제 이름을 준다.
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer os.Remove(tmp) // 제 이름을 받았으면 지울 것이 없다
 
 	// ID를 팩 이름으로 네임스페이스한다.
 	//
@@ -285,8 +302,24 @@ func WritePack(dir string, s Spec, ps []pack.Problem, now time.Time) (string, er
 	for _, p := range ps {
 		p.ID = prefix + p.ID
 		if err := enc.Encode(p); err != nil {
+			f.Close()
 			return "", err
 		}
 	}
-	return path, f.Sync()
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return "", err
+	}
+	// 이름 바꾸기까지 디스크에 내린다. vfat에는 저널이 없다.
+	if d, err := os.Open(dir); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return path, nil
 }

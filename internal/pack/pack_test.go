@@ -275,3 +275,39 @@ func TestLengthOfSortsPromptsIntoThreeKinds(t *testing.T) {
 		t.Error("단문에 에디터를 연다")
 	}
 }
+
+func TestLoadKeepsWholePackWhenLastLineIsTorn(t *testing.T) {
+	// 팩을 쓰는 도중에 전원이 끊기면 마지막 줄이 조각으로 남는다. 그 한 줄
+	// 때문에 멀쩡한 문항까지 통째로 버리면 방금 값을 치른 팩이 무효가 된다.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.jsonl")
+	body := `{"id":"p001","dir":"ko2ja","prompt":"하나","reference":"一","style":"plain"}` + "\n" +
+		`{"id":"p002","dir":"ko2ja","prompt":"둘","reference":"二","style":"plain"}` + "\n" +
+		`{"id":"p003","dir":"ko2ja","prompt":"셋","refere`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("조각 한 줄로 팩 전체를 잃었다: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("문제 %d개, 기대 2개", len(got))
+	}
+}
+
+func TestLoadStillRejectsGarbageOnTheLastLine(t *testing.T) {
+	// 조각인 것과 그냥 깨진 것은 다르다. 후자까지 봐주면 망가진 팩을
+	// 조용히 반만 읽게 된다.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.jsonl")
+	body := `{"id":"p001","dir":"ko2ja","prompt":"하나","reference":"一","style":"plain"}` + "\n" +
+		"이건 JSON이 아니다\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Error("깨진 줄을 조각으로 봐줬다")
+	}
+}

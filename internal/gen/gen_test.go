@@ -28,7 +28,7 @@ func at() time.Time { return time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC) }
 
 func TestGenerateParsesProblems(t *testing.T) {
 	f := &llm.FakeClient{Reply: goodReply}
-	got, err := Generate(context.Background(), f, spec())
+	got, _, err := Generate(context.Background(), f, spec())
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestGenerateParsesProblems(t *testing.T) {
 
 func TestGeneratePassesSpecToPrompt(t *testing.T) {
 	f := &llm.FakeClient{Reply: goodReply}
-	if _, err := Generate(context.Background(), f, spec()); err != nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err != nil {
 		t.Fatal(err)
 	}
 	body := f.Got.User + f.Got.System
@@ -65,7 +65,7 @@ func TestGeneratePassesSpecToPrompt(t *testing.T) {
 func TestGeneratePromptForbidsTreatingReferenceAsOnlyAnswer(t *testing.T) {
 	// 스펙 §5.4. 생성 단계에서부터 이 전제를 심는다.
 	f := &llm.FakeClient{Reply: goodReply}
-	if _, err := Generate(context.Background(), f, spec()); err != nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(f.Got.System, "유일한 정답") {
@@ -75,14 +75,14 @@ func TestGeneratePromptForbidsTreatingReferenceAsOnlyAnswer(t *testing.T) {
 
 func TestGenerateRejectsWrongDirection(t *testing.T) {
 	f := &llm.FakeClient{Reply: strings.ReplaceAll(goodReply, `"ko2ja"`, `"ja2ko"`)}
-	if _, err := Generate(context.Background(), f, spec()); err == nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err == nil {
 		t.Error("요청한 방향과 다르면 거부해야 한다")
 	}
 }
 
 func TestGenerateRejectsEmptyReference(t *testing.T) {
 	f := &llm.FakeClient{Reply: `{"problems":[{"id":"x1","dir":"ko2ja","prompt":"질문","reference":"","style":"plain"}]}`}
-	if _, err := Generate(context.Background(), f, spec()); err == nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err == nil {
 		t.Error("참조가 비면 드릴이 성립하지 않는다")
 	}
 }
@@ -92,7 +92,7 @@ func TestGenerateRejectsEmptyReference(t *testing.T) {
 func TestGenerateDropsBadItemsAndKeepsTheRest(t *testing.T) {
 	// 둘째 문항의 id가 첫째와 겹친다.
 	f := &llm.FakeClient{Reply: strings.ReplaceAll(goodReply, `"x2"`, `"x1"`)}
-	got, err := Generate(context.Background(), f, spec())
+	got, _, err := Generate(context.Background(), f, spec())
 	if err != nil {
 		t.Fatalf("쓸 수 있는 문항이 있으면 실패하면 안 된다: %v", err)
 	}
@@ -103,28 +103,28 @@ func TestGenerateDropsBadItemsAndKeepsTheRest(t *testing.T) {
 
 func TestGenerateFailsOnlyWhenNothingIsUsable(t *testing.T) {
 	f := &llm.FakeClient{Reply: `{"problems":[{"id":"x1","dir":"ko2ja","prompt":"질문","reference":"","style":"plain"}]}`}
-	if _, err := Generate(context.Background(), f, spec()); err == nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err == nil {
 		t.Error("쓸 수 있는 문항이 하나도 없으면 오류여야 한다")
 	}
 }
 
 func TestGenerateRejectsMalformedJSON(t *testing.T) {
 	f := &llm.FakeClient{Reply: `이건 JSON이 아니다`}
-	if _, err := Generate(context.Background(), f, spec()); err == nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err == nil {
 		t.Error("깨진 응답은 오류여야 한다")
 	}
 }
 
 func TestGenerateRejectsEmptyResult(t *testing.T) {
 	f := &llm.FakeClient{Reply: `{"problems":[]}`}
-	if _, err := Generate(context.Background(), f, spec()); err == nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err == nil {
 		t.Error("빈 결과는 오류여야 한다")
 	}
 }
 
 func TestGenerateRejectsZeroCount(t *testing.T) {
 	f := &llm.FakeClient{Reply: goodReply}
-	if _, err := Generate(context.Background(), f, Spec{Dir: pack.KoToJa, Count: 0}); err == nil {
+	if _, _, err := Generate(context.Background(), f, Spec{Dir: pack.KoToJa, Count: 0}); err == nil {
 		t.Error("문항 수 0은 오류여야 한다")
 	}
 	if f.Calls != 0 {
@@ -250,7 +250,7 @@ func TestGenerateDropsKeyPointsNotInReference(t *testing.T) {
 	  "traps":[],"style":"polite"}]}`
 	f := &llm.FakeClient{Reply: reply}
 
-	got, err := Generate(context.Background(), f, spec())
+	got, _, err := Generate(context.Background(), f, spec())
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestGenerateDropsKeyPointsNotInReference(t *testing.T) {
 
 func TestGeneratePromptDemandsLiteralKeyPoints(t *testing.T) {
 	f := &llm.FakeClient{Reply: goodReply}
-	if _, err := Generate(context.Background(), f, spec()); err != nil {
+	if _, _, err := Generate(context.Background(), f, spec()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(f.Got.System, "글자 그대로") {

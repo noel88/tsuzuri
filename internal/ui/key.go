@@ -53,11 +53,27 @@ func Interactive() bool {
 // 직접 한 덩어리를 읽어 남은 바이트를 자기 안에 들고 있었는데, 다음 화면이
 // 한 줄 읽기로 넘어가면 그 바이트를 아무도 못 봤다. 초기화면에서 Enter를
 // 누르고 곧바로 답을 쳐 넣으면 — 사람이 빠르게 치면 한 덩어리로 온다 —
-// 답안이 통째로 사라졌다. 저장도 안 되고 화면은 답을 기다리고 있었다.
+// 답안이 통째로 사라졌다.
 type KeyReader struct {
 	in *bufio.Reader
 	f  *os.File
+
+	// state는 이스케이프 열을 읽던 중인지다.
+	//
+	// 터미널이 ESC 와 「[3~」를 나눠 건네주는 일이 있다. 남은 바이트를 그냥
+	// 두면 다음 줄 읽기가 그것을 답안의 첫 글자로 읽는다 — 「[3~」로 시작하는
+	// 답안이 저장되고 첨삭 요청으로 나가 값을 치른다. 다음 읽기에서 열
+	// 해석을 이어가야 하고, 그러려면 어디까지 읽었는지 기억해야 한다.
+	state seqState
 }
+
+type seqState int
+
+const (
+	seqNone     seqState = iota
+	seqAfterEsc          // ESC만 받았다. 다음 바이트가 '[' 나 'O' 면 열이다
+	seqInside            // 열 안이다. 마지막 글자가 올 때까지 삼킨다
+)
 
 // NewKeyReader는 in에서 키를 읽는 읽개를 만든다.
 // f는 raw mode를 걸 대상이고, 읽기는 언제나 in으로 한다.
@@ -77,110 +93,108 @@ func (r *KeyReader) Read() (KeyPress, error) {
 		return KeyPress{}, err
 	}
 	defer term.Restore(fd, state)
-
-	b, err := r.in.ReadByte()
-	if err != nil {
-		return KeyPress{Key: KeyQuit}, nil
-	}
-
-	switch b {
-	case 0x03, 0x04: // Ctrl+C, Ctrl+D
-		// raw mode에서는 Ctrl+C가 신호가 아니라 바이트로 온다. 신호였다면
-		// defer가 돌지 못해 터미널이 raw인 채로 남는다 — 바이트로 받는
-		// 편이 오히려 안전하다.
-		return KeyPress{Key: KeyQuit}, nil
-	case '\r', '\n':
-		return KeyPress{Key: KeyEnter}, nil
-	case 0x1b:
-		return r.escape(), nil
-	}
-
-	if b < utf8.RuneSelf {
-		return KeyPress{Key: KeyRune, Rune: rune(b)}, nil
-	}
-	return KeyPress{Key: KeyRune, Rune: r.rune(b)}, nil
+	return r.readNoRaw()
 }
 
-// escape는 ESC 뒤에 붙어 온 것을 본다. 아무것도 안 붙었으면 ESC 자체다.
-//
-// 이미 버퍼에 들어와 있는 것만 본다. 더 읽으러 가면 ESC만 누른 사람을
-// 다음 키를 누를 때까지 기다리게 만든다.
-func (r *KeyReader) escape() KeyPress {
-	if r.in.Buffered() < 2 {
-		return KeyPress{Key: KeyEscape}
+// readNoRaw는 터미널 모드를 건드리지 않고 키 하나를 읽는다.
+// 상태 기계를 터미널 없이 시험할 수 있게 갈라 두었다.
+func (r *KeyReader) readNoRaw() (KeyPress, error) {
+	for {
+		b, err := r.in.ReadByte()
+		if err != nil {
+			return KeyPress{Key: KeyQuit}, nil
+		}
+
+		switch r.state {
+		case seqInside:
+			// 열의 나머지를 삼킨다. CSI 열은 0x40~0x7E 의 글자로 끝난다.
+			if b >= 0x40 && b <= 0x7e {
+				r.state = seqNone
+			}
+			continue
+
+		case seqAfterEsc:
+			r.state = seqNone
+			if b == '[' || b == 'O' {
+				if k, ok := r.readSeq(b); ok {
+					return k, nil
+				}
+				continue
+			}
+			// 열이 아니었다. 이 바이트를 보통 글자로 본다 — 아래로 흐른다.
+		}
+
+		switch b {
+		case 0x03, 0x04: // Ctrl+C, Ctrl+D
+			// raw mode에서는 Ctrl+C가 신호가 아니라 바이트로 온다. 신호였다면
+			// defer가 돌지 못해 터미널이 raw인 채로 남는다 — 바이트로 받는
+			// 편이 오히려 안전하다.
+			return KeyPress{Key: KeyQuit}, nil
+		case '\r', '\n':
+			return KeyPress{Key: KeyEnter}, nil
+		case 0x1b:
+			if r.in.Buffered() == 0 {
+				// 뒤가 아직 안 왔다. ESC로 넘기되 이어서 볼 수 있게 표시한다.
+				// 여기서 더 읽으러 가면 ESC만 누른 사람을 다음 키를 누를
+				// 때까지 기다리게 만든다.
+				r.state = seqAfterEsc
+				return KeyPress{Key: KeyEscape}, nil
+			}
+			c, err := r.in.ReadByte()
+			if err != nil {
+				return KeyPress{Key: KeyEscape}, nil
+			}
+			if c != '[' && c != 'O' {
+				if err := r.in.UnreadByte(); err != nil {
+					return KeyPress{Key: KeyEscape}, nil
+				}
+				return KeyPress{Key: KeyEscape}, nil
+			}
+			if k, ok := r.readSeq(c); ok {
+				return k, nil
+			}
+			continue
+		}
+
+		if b < utf8.RuneSelf {
+			return KeyPress{Key: KeyRune, Rune: rune(b)}, nil
+		}
+		return KeyPress{Key: KeyRune, Rune: r.rune(b)}, nil
 	}
-	p, err := r.in.Peek(2)
+}
+
+// readSeq는 「ESC [」 또는 「ESC O」 다음을 읽는다.
+//
+// 화살표면 그 키를 돌려준다. 그 밖의 열(Delete·Home·기능키)은 통째로
+// 삼키고 ok=false를 돌려준다 — 부르는 쪽은 다음 키를 계속 읽는다.
+// 열이 아직 안 끝났으면 다음 읽기에서 이어가도록 표시한다.
+func (r *KeyReader) readSeq(_ byte) (KeyPress, bool) {
+	if r.in.Buffered() == 0 {
+		r.state = seqInside
+		return KeyPress{}, false
+	}
+	b, err := r.in.ReadByte()
 	if err != nil {
-		return KeyPress{Key: KeyEscape}
+		return KeyPress{}, false
 	}
 	// ESC [ A 와 ESC O A 를 둘 다 받는다. 커서 키는 터미널이 어느 모드에
 	// 있느냐에 따라 두 꼴로 온다.
-	if p[0] != '[' && p[0] != 'O' {
-		return KeyPress{Key: KeyEscape}
-	}
-	var k Key
-	switch p[1] {
+	switch b {
 	case 'A':
-		k = KeyUp
+		return KeyPress{Key: KeyUp}, true
 	case 'B':
-		k = KeyDown
+		return KeyPress{Key: KeyDown}, true
 	case 'C':
-		k = KeyRight
+		return KeyPress{Key: KeyRight}, true
 	case 'D':
-		k = KeyLeft
-	default:
-		// Delete·Home·기능키 같은 모르는 열이다. 통째로 버린다.
-		//
-		// 남겨 두면 그 바이트를 다음 줄 읽기가 답안의 첫 글자로 읽는다.
-		// 「[3~」로 시작하는 답안이 저장되고 첨삭 요청으로 나가 값을
-		// 치른다. 실제로 그랬다.
-		r.discardSequence()
-		return KeyPress{Key: KeyEscape}
+		return KeyPress{Key: KeyLeft}, true
 	}
-	r.in.Discard(2)
-	return KeyPress{Key: k}
-}
-
-// discardSequence는 이미 들어와 있는 이스케이프 열의 나머지를 버린다.
-//
-// 버퍼의 앞은 '[' (CSI) 이거나 'O' (SS3) 다. CSI 열은 매개변수(0x30~0x3F)와
-// 중간 바이트(0x20~0x2F)가 이어지다가 0x40~0x7E 의 글자로 끝난다.
-//
-// 버퍼에 있는 만큼만 본다 — 더 읽으러 가면 열이 아니었을 때 사용자를
-// 기다리게 만든다. 열에 속하지 않는 바이트를 만나면 거기서 멈춘다.
-// 남은 것을 몽땅 버리면 뒤에 이어 친 답안까지 먹는다.
-func (r *KeyReader) discardSequence() {
-	p, err := r.in.Peek(1)
-	if err != nil {
-		return
+	// 모르는 열이다. 마지막 글자까지 삼킨다.
+	if b >= 0x40 && b <= 0x7e {
+		return KeyPress{}, false
 	}
-	if p[0] == 'O' {
-		// ESC O 다음 한 글자로 끝난다.
-		n := 2
-		if b := r.in.Buffered(); b < n {
-			n = b
-		}
-		r.in.Discard(n)
-		return
-	}
-
-	for i := 1; i < r.in.Buffered(); i++ {
-		q, err := r.in.Peek(i + 1)
-		if err != nil {
-			break
-		}
-		c := q[i]
-		switch {
-		case c >= 0x40 && c <= 0x7e: // 마지막 글자
-			r.in.Discard(i + 1)
-			return
-		case c >= 0x20 && c <= 0x3f: // 매개변수·중간 바이트
-		default: // 열이 아니다. 여기까지만 버린다.
-			r.in.Discard(i)
-			return
-		}
-	}
-	r.in.Discard(r.in.Buffered())
+	r.state = seqInside
+	return KeyPress{}, false
 }
 
 // rune은 첫 바이트를 받은 뒤 나머지를 마저 읽어 글자 하나를 만든다.

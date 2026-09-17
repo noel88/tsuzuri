@@ -28,12 +28,17 @@ var ResultActions = []Action{
 // 경로를 그대로 써야 하고 — 그래야 입력기가 동작하고 친 글자가 화면에
 // 보인다 — 키를 하나씩 받으려면 그 에코를 우리가 꺼야 하기 때문이다.
 // 아무것도 치고 있지 않은 이 순간에만 키를 하나씩 받는다.
+// 글자 키를 달지 않는다.
+//
+// 이 줄이 떠 있는 줄 모르고 답을 치기 시작하면 그 글자가 명령으로 먹힌다.
+// 「Mata ashita」를 치면 첫 글자 M에서 메뉴로 튀고 나머지는 버려진다.
+// 여기서는 화살표로만 고르고, 글자를 치면 쓰던 자리로 돌아간다.
 var AnswerActions = []Action{
 	{CmdStay, "", "계속 쓰기"},
-	{CmdEdit, ":e", "긴 답"},
+	{CmdEdit, "", "긴 답"},
 	{CmdNext, "", "건너뛰기"},
-	{CmdMenu, "M", "메뉴"},
-	{CmdQuit, "X", "종료"},
+	{CmdMenu, "", "메뉴"},
+	{CmdQuit, "", "종료"},
 }
 
 // ActionByKey는 눌린 글자에 해당하는 선택지를 찾는다.
@@ -42,7 +47,9 @@ var AnswerActions = []Action{
 // 넘겼는데, 답안 화면의 고르기 줄에서 b를 누르면 그 줄에 없는 「복습에
 // 넣기」가 돌아왔고 표시도 안 남긴 채 문제만 조용히 넘어갔다.
 func ActionByKey(as []Action, r rune) (Command, bool) {
-	k := strings.ToUpper(string(r))
+	// 전각을 반각으로 고쳐서 본다. 입력기가 히라가나 모드면 x를 쳐도
+	// 전각 「ｘ」가 확정된다 — 그대로 비교하면 종료 키가 죽는다.
+	k := strings.ToUpper(normalizeCommand(string(r)))
 	for _, a := range as {
 		if a.Key != "" && strings.ToUpper(a.Key) == k {
 			return a.Cmd, true

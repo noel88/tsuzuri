@@ -264,21 +264,35 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 		fmt.Fprint(s.Out, page)
 
 		line, eof, err := ui.ReadLine(s.In)
-		if err == nil && p.IsLong() && strings.TrimSpace(line) == "" && !eof {
+		if err != nil {
+			return "", ui.CmdStay, eof, err
+		}
+		if p.IsLong() && strings.TrimSpace(line) == "" && !eof {
 			// 문단 하나를 한 줄 입력으로 쓸 수는 없다. 긴 문항은 곧바로
 			// 편집기를 연다 — 여기서 고르기 줄을 띄우면 매번 「긴 답」을
 			// 골라야 하고, 그것 말고 고를 것도 없다.
 			text, err := ui.ReadFromEditor("", "")
-			return text, ui.CmdStay, false, err
-		}
-		if err != nil {
-			return "", ui.CmdStay, eof, err
+			if err != nil {
+				return "", ui.CmdStay, false, err
+			}
+			if strings.TrimSpace(text) != "" {
+				return text, ui.CmdStay, false, nil
+			}
+			// 편집기를 저장 없이 닫았다. 그대로 넘기면 문항 하나가 기록도
+			// 없이 사라진다 — 잘못 연 것일 수도 있으니 무엇을 할지 묻는다.
+			if cmd, err := s.editorCancelled(p, st); cmd != ui.CmdStay || err != nil {
+				return "", cmd, false, err
+			}
+			continue
 		}
 		trimmed := strings.TrimSpace(line)
 
 		if ui.IsEditorRequest(line) {
 			text, err := ui.ReadFromEditor("", "")
-			return text, ui.CmdStay, eof, err
+			if err != nil || strings.TrimSpace(text) != "" {
+				return text, ui.CmdStay, eof, err
+			}
+			continue
 		}
 		// 팩 받기 프롬프트에서 쓰는 :q도 여기서 받는다. 받지 않으면
 		// 그것이 답안으로 저장되어 첨삭 요청으로 나가고 값을 치른다.
@@ -304,13 +318,25 @@ func (s *Session) askAnswer(p pack.Problem, st ui.Status) (string, ui.Command, b
 			return "", ui.CmdStay, false, err
 		case cmd == ui.CmdEdit:
 			text, err := ui.ReadFromEditor("", "")
-			return text, ui.CmdStay, false, err
+			if err != nil || strings.TrimSpace(text) != "" {
+				return text, ui.CmdStay, false, err
+			}
+			// 저장 없이 닫았다. 다시 답 치는 화면으로.
 		case cmd == ui.CmdStay:
 			// 다시 답 치는 화면으로.
 		default:
 			return "", cmd, false, nil
 		}
 	}
+}
+
+// editorCancelled는 긴 문항에서 편집기를 저장 없이 닫았을 때 무엇을 할지
+// 묻는다. 긴 문항은 고르기 줄을 거치지 않으므로 여기서 한 번 띄운다.
+func (s *Session) editorCancelled(p pack.Problem, st ui.Status) (ui.Command, error) {
+	if s.keys == nil {
+		return ui.CmdNext, nil
+	}
+	return s.chooseAnswerAction(p, st)
 }
 
 // chooseAnswerAction은 답안 화면의 고르기 줄을 돌린다.
@@ -322,7 +348,8 @@ func (s *Session) chooseAnswerAction(p pack.Problem, st ui.Status) (ui.Command, 
 
 		k, err := s.keys.Read()
 		if err != nil {
-			return ui.CmdStay, err
+			// raw mode가 안 되는 터미널이다. 결과 화면과 같게 물러난다.
+			return ui.CmdStay, nil
 		}
 		switch k.Key {
 		case ui.KeyQuit:
@@ -334,9 +361,9 @@ func (s *Session) chooseAnswerAction(p pack.Problem, st ui.Status) (ui.Command, 
 		case ui.KeyEscape:
 			return ui.CmdStay, nil
 		case ui.KeyRune:
-			if cmd, ok := ui.ActionByKey(ui.AnswerActions, k.Rune); ok {
-				return cmd, nil
-			}
+			// 글자를 치기 시작했으면 쓰려는 것이다. 쓰던 자리로 돌려보낸다 —
+			// 여기서 삼키면 답을 통째로 허공에 치게 된다.
+			return ui.CmdStay, nil
 		}
 	}
 }

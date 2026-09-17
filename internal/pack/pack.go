@@ -3,7 +3,9 @@ package pack
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,6 +86,16 @@ func LengthOf(prompt string) string {
 // 그런 문항은 답 자리에서 바로 에디터를 연다.
 func (p Problem) IsLong() bool { return LengthOf(p.Prompt) == LenLong }
 
+// torn은 그 줄이 쓰다 만 조각인지 본다.
+//
+// 디코더는 JSON이 덜 끝났을 때 io.ErrUnexpectedEOF를 낸다. 문법이 틀린
+// 줄은 다른 오류를 낸다.
+func torn(text string) bool {
+	var v any
+	err := json.NewDecoder(strings.NewReader(text)).Decode(&v)
+	return errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // NormalizeLevel은 "2"처럼 N을 뺀 레벨을 "N2"로 고친다.
 //
 // 레벨은 자유 문자열이라 무엇이든 받지만, 그 값이 그대로 생성 프롬프트에
@@ -136,21 +148,39 @@ func Load(path string) ([]Problem, error) {
 	// 기본 버퍼는 64KB다. 긴 문장이 들어갈 수 있으니 넉넉히 잡는다.
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	for line := 1; sc.Scan(); line++ {
-		text := strings.TrimSpace(trimBOM(sc.Text()))
-		if text == "" {
-			continue
+	// 줄을 먼저 다 모은 뒤에 푼다. 마지막 줄이 잘렸는지 알려면 그 줄이
+	// 마지막인지 알아야 한다.
+	var texts []string
+	for sc.Scan() {
+		if text := strings.TrimSpace(trimBOM(sc.Text())); text != "" {
+			texts = append(texts, text)
 		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+
+	for i, text := range texts {
+		line := i + 1
 		var p Problem
 		if err := json.Unmarshal([]byte(text), &p); err != nil {
+			if i == len(texts)-1 && torn(text) {
+				// 마지막 줄이 쓰다 만 조각이면 봐준다.
+				//
+				// 팩을 쓰는 도중에 전원이 끊기면 마지막 줄이 조각으로 남는다.
+				// 그 한 줄 때문에 멀쩡한 49문항까지 통째로 버리면, 방금 값을
+				// 치른 팩 전체가 무효가 되고 고칠 방법이 앱 안에 없다.
+				//
+				// 조각인 것과 그냥 깨진 것은 다르다. 조각은 올바른 JSON의
+				// 앞부분이고, 깨진 것은 애초에 JSON이 아니다. 후자까지
+				// 봐주면 망가진 팩을 조용히 반만 읽게 된다.
+				break
+			}
 			return nil, fmt.Errorf("%s %d번째 줄: %w", path, line, err)
 		}
 		p.Source = path
 		p.Level = NormalizeLevel(p.Level)
 		out = append(out, p)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
 	}
 	return out, nil
 }

@@ -86,7 +86,7 @@ func TestExtractJSONRejectsEmptyToolInput(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := extractJSON(msg)
+	got, err := extractJSON(msg, "문항 수를 줄여 보세요")
 	if err == nil {
 		t.Fatalf("끊긴 응답을 성공으로 넘기면 안 된다: %q", got)
 	}
@@ -101,7 +101,7 @@ func TestExtractJSONAcceptsRealToolInput(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatal(err)
 	}
-	got, err := extractJSON(msg)
+	got, err := extractJSON(msg, "문항 수를 줄여 보세요")
 	if err != nil {
 		t.Fatalf("정상 응답인데 실패했다: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestExtractJSONReportsTruncation(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := extractJSON(msg); err == nil || !strings.Contains(err.Error(), "팩 크기") {
+	if _, err := extractJSON(msg, "문항 수를 줄여 보세요"); err == nil || !strings.Contains(err.Error(), "문항 수") {
 		t.Errorf("토큰 한도 절단을 알려야 한다: %v", err)
 	}
 }
