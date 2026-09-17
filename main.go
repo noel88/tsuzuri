@@ -60,6 +60,9 @@ type app struct {
 	// 키를 하나씩 읽는 읽개. 화살표를 쓸 수 없는 입력이면 비어 있다.
 	keys *ui.KeyReader
 
+	// 다 푼 팩을 자료실에 펼쳐 놓았는지.
+	showDone bool
+
 	// 사전은 한 번에 하나만 상주시킨다.
 	//
 	// 측정: 일본어(IPADIC) 88MB + 한국어(ko-dic) 211MB = 300MB 라이브 힙.
@@ -99,6 +102,16 @@ type packSet struct {
 	dir      pack.Direction
 	source   string
 	problems []pack.Problem
+}
+
+// finished는 팩의 문제를 하나도 남김없이 풀었는지 본다.
+func (p packSet) finished(solved map[string]bool) bool {
+	for _, pr := range p.problems {
+		if !solved[pr.ID] {
+			return false
+		}
+	}
+	return len(p.problems) > 0
 }
 
 // progress는 「푼 것/전체」다.
@@ -176,14 +189,7 @@ func (a *app) run() error {
 		if err != nil {
 			return err
 		}
-		choices := make([]ui.Choice, 0, len(sets))
-		for _, s := range sets {
-			choices = append(choices, ui.Choice{
-				Key:   s.key,
-				Label: s.label(),
-				Value: s.progress(solved),
-			})
-		}
+		choices := a.archive(sets, solved)
 		key, eof := pending, false
 		if pending == "" {
 			var ok bool
@@ -280,6 +286,9 @@ func (a *app) chooseMenu(choices []ui.Choice, st ui.Status) (key string, eof, ok
 // dispatch는 초기화면의 선택을 처리한다. 종료해야 하면 true를 돌려준다.
 func (a *app) dispatch(key string, sets []packSet) (bool, error) {
 	switch key {
+	case doneToggleKey:
+		a.showDone = !a.showDone
+		return false, nil
 	case "1":
 		// 「드릴 시작」은 자료실 첫 팩을 뜻한다.
 		if len(sets) == 0 {
@@ -465,6 +474,41 @@ func (a *app) solvedByProblem() (map[string]bool, error) {
 	return out, nil
 }
 
+// doneToggleKey는 완료한 팩을 펼치고 접는 번호다.
+const doneToggleKey = "0"
+
+// archive는 자료실에 보일 줄을 만든다.
+//
+// 다 푼 팩은 기본으로 접어 둔다. 팩은 지우지 않으므로 — 지우면 그 문제로
+// 받은 첨삭과 복습도 함께 잃는다 — 쌓이기만 하고, 그러면 오늘 할 것이
+// 어느 줄인지 찾기 어려워진다.
+//
+// 접어 두되 없애지는 않는다. 다시 풀고 싶을 때가 있고, 지운 것이 아니라
+// 접어 둔 것임을 알 수 있어야 한다.
+func (a *app) archive(sets []packSet, solved map[string]bool) []ui.Choice {
+	out := make([]ui.Choice, 0, len(sets)+1)
+	done := 0
+	for _, s := range sets {
+		if s.finished(solved) {
+			done++
+			if !a.showDone {
+				continue
+			}
+			out = append(out, ui.Choice{Key: s.key, Label: s.label(), Value: "완료"})
+			continue
+		}
+		out = append(out, ui.Choice{Key: s.key, Label: s.label(), Value: s.progress(solved)})
+	}
+	if done == 0 {
+		return out
+	}
+	label, value := "완료한 팩 보기", fmt.Sprintf("%d팩", done)
+	if a.showDone {
+		label, value = "완료한 팩 접기", ""
+	}
+	return append(out, ui.Choice{Key: doneToggleKey, Label: label, Value: value})
+}
+
 // known은 지금 자료실에 있는 문제를 ID로 찾을 수 있게 모은다.
 //
 // 팩 파일은 사용자가 지울 수 있다. 지운 팩의 문제는 답안이 남아 있어도
@@ -582,6 +626,17 @@ func (a *app) stats(sets []packSet) (bool, error) {
 	}
 	now := time.Now()
 	s := progress.Summarize(attempts, feedback, cards, now)
+
+	solved, err := a.solvedByProblem()
+	if err != nil {
+		return false, err
+	}
+	for _, set := range sets {
+		if set.finished(solved) {
+			s.DonePacks++
+		}
+	}
+	s.Packs = len(sets)
 
 	labels := map[string]string{}
 	for id, p := range known(sets) {

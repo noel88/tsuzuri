@@ -31,6 +31,9 @@ func RenderStats(s progress.Stats, cards []progress.Card, labels map[string]stri
 	lines = append(lines, Row("제출한 답안", plural(s.Total, "건"), inner))
 	lines = append(lines, Row("손댄 문제", plural(s.Problems, "개"), inner))
 	lines = append(lines, Row("받은 첨삭", plural(s.Feedback, "건"), inner))
+	if s.Packs > 0 {
+		lines = append(lines, Row("끝낸 팩", fmt.Sprintf("%d/%d", s.DonePacks, s.Packs), inner))
+	}
 
 	lines = append(lines, "")
 	lines = append(lines, "  "+Divider(inner))

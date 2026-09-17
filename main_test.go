@@ -107,3 +107,43 @@ func TestPackProgressCountsDistinctProblems(t *testing.T) {
 		t.Errorf("progress = %q — 다른 팩을 셌다", got)
 	}
 }
+
+func TestArchiveFoldsFinishedPacks(t *testing.T) {
+	// 팩은 지우지 않으므로 쌓이기만 한다. 다 푼 것을 접어 두지 않으면
+	// 오늘 할 것이 어느 줄인지 찾기 어려워진다.
+	sets := []packSet{
+		{key: "41", dir: pack.KoToJa, problems: []pack.Problem{{ID: "a1"}, {ID: "a2"}}},
+		{key: "42", dir: pack.JaToKo, problems: []pack.Problem{{ID: "b1"}}},
+	}
+	solved := map[string]bool{"a1": true, "a2": true} // 41만 끝냈다
+
+	a := &app{}
+	got := a.archive(sets, solved)
+	if len(got) != 2 {
+		t.Fatalf("줄 %d개: %+v", len(got), got)
+	}
+	if got[0].Key != "42" {
+		t.Errorf("끝낸 팩이 접히지 않았다: %+v", got)
+	}
+	if got[1].Key != doneToggleKey || got[1].Value != "1팩" {
+		t.Errorf("접어 둔 것을 알리지 않았다: %+v", got[1])
+	}
+
+	// 펼치면 다시 보인다. 지운 것이 아니라 접어 둔 것이다.
+	a.showDone = true
+	got = a.archive(sets, solved)
+	if len(got) != 3 {
+		t.Fatalf("펼친 줄 %d개: %+v", len(got), got)
+	}
+	if got[0].Key != "41" || got[0].Value != "완료" {
+		t.Errorf("완료 표시가 없다: %+v", got[0])
+	}
+}
+
+func TestArchiveHasNoToggleWhenNothingFinished(t *testing.T) {
+	a := &app{}
+	sets := []packSet{{key: "41", problems: []pack.Problem{{ID: "a1"}}}}
+	if got := a.archive(sets, nil); len(got) != 1 {
+		t.Errorf("끝낸 팩이 없는데 줄이 늘었다: %+v", got)
+	}
+}
