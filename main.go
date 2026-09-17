@@ -463,7 +463,7 @@ func (a *app) stats() (bool, error) {
 	if byID, skipped, err := pack.ByID(filepath.Join(a.dataDir, "packs")); err == nil {
 		a.reportSkipped(skipped)
 		for id, p := range byID {
-			labels[id] = ui.Truncate(p.Prompt, 40)
+			labels[id] = ui.TruncateMark(p.Prompt, 40)
 		}
 	}
 

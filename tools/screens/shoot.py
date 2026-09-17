@@ -106,9 +106,9 @@ class Screen:
     def current_page(self):
         """마지막 화면의 머리(╔ 배너나 ┌ 상자)부터 끝까지.
 
-        이 앱은 화면을 지우지 않고 이어서 출력한다(fbterm의 ANSI 지원이
-        불확실해서다). 실제 터미널에서는 위쪽에 이전 화면의 끝부분이
-        보이지만, 캡처는 화면 하나 단위로 잘라 담는다.
+        캡처는 화면 지우기를 끄고(TSUZURI_NO_CLEAR=1) 받으므로 출력이
+        이어진다. 여기서 마지막 한 화면만 잘라낸다. 실기에서는 앱이
+        ANSI로 화면을 지우므로 보이는 것은 이 한 화면뿐이다.
         """
         all_lines = self.lines + [self.cur]
         start = 0
@@ -126,7 +126,11 @@ class Session:
         # 앱이 뜨기 전에 폭을 정해 둔다. 앱은 TIOCGWINSZ로 이 값을 읽는다.
         fcntl.ioctl(slave, termios.TIOCSWINSZ,
                     struct.pack("HHHH", ROWS, COLS, 0, 0))
-        env = dict(os.environ, TSUZURI_DATA=str(data_dir), TERM="linux")
+        # 화면 지우기를 끄고 받는다. 앱은 실기에서 ANSI로 화면을 지우지만,
+        # 여기서는 출력이 이어져야 화면 하나를 통째로 잘라낼 수 있다.
+        # 결과는 같다 — 실기도 한 번에 한 화면만 보인다.
+        env = dict(os.environ, TSUZURI_DATA=str(data_dir), TERM="linux",
+                   TSUZURI_NO_CLEAR="1")
         env.pop("COLUMNS", None)
         self.proc = subprocess.Popen(
             [str(binary)], stdin=slave, stdout=slave, stderr=slave,
@@ -245,8 +249,7 @@ def render(page, path, theme):
     """한 화면을 그린다.
 
     실기 화면은 128x36칸인데 한 화면의 내용은 20줄 남짓이라 아래가 빈다.
-    실제 터미널에서는 그 자리에 이전 화면의 끝부분이 남아 있지만, 캡처는
-    화면 단위로 잘라 담으므로 빈 줄을 걷어내고 쓴 만큼만 그린다.
+    빈 줄을 걷어내고 쓴 만큼만 그린다.
     """
     s = SCALE
     cw, chh = CELL_W * s, CELL_H * s
@@ -303,20 +306,89 @@ SAMPLE_FEEDBACK = {
 }
 
 
+ANSWERS = {
+    "demo-a1": "昨日初めて行ったカフェは静かくて、ずっと座ってました。",
+    "demo-a2": "雨が降りそうで傘を持ってきました。",
+    "demo-a3": "昨日初めて行ったカフェが思ったより静かで、長く座っていました。",
+    "demo-a4": "雨が降りそうなのに傘を持ってきました。",
+    "demo-a5": "昨日初めて行ったカフェが思ったより静かで、長く座っていた。",
+    "demo-a6": "雨が降るので傘を持ってきました。",
+    "demo-a7": "昨日行ったカフェは静かでした。",
+    "demo-a8": "어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.",
+    "demo-a9": "어제 처음 간 카페가 생각보다 조용해서 한참 있었다.",
+}
+
+
 def seed(data):
+    """화면을 보여주기 위한 예시 데이터. 실제 사용 기록이 아니다.
+
+    진도 화면은 며칠치 기록이 쌓여야 보여줄 것이 생긴다. 날짜는 캡처를
+    뽑는 날 기준으로 만든다 — 고정 날짜로 박아 두면 몇 달 뒤에 찍은 캡처의
+    「연속 3일」이 3년 전 날짜 위에 앉는다.
+    """
+    import json
+    from datetime import datetime, timedelta
+
     packs = data / "packs"
     packs.mkdir(parents=True)
     for name in ("sample-ko2ja.jsonl", "sample-ja2ko.jsonl"):
         shutil.copy(REPO / "testdata" / "packs" / name, packs / name)
-    import json
+
+    now = datetime.now().astimezone()
+
+    def when(days, hour=21):
+        d = (now - timedelta(days=days)).replace(hour=hour, minute=40, second=0,
+                                                 microsecond=0)
+        return d.isoformat()
+
+    # (id, 문제, 며칠 전, 빠뜨린 표현)
+    rows = [
+        ("demo-a7", "p001", 7, ["初めて", "〜ていた"]),
+        ("demo-a6", "p002", 6, ["〜そう", "ので"]),
+        ("demo-a8", "s-ja001", 3, ["생각보다"]),
+        ("demo-a1", "p001", 3, ["初めて"]),
+        ("demo-a2", "p002", 3, ["〜そう", "ので"]),
+        ("demo-a3", "p001", 2, ["〜ていた"]),
+        ("demo-a9", "s-ja001", 1, ["앉아 있"]),
+        ("demo-a4", "p002", 1, ["〜そう"]),
+        ("demo-a5", "p001", 0, []),
+    ]
     with open(data / "attempts.jsonl", "w") as f:
-        f.write(json.dumps({
-            "id": "demo-a1", "pack_id": "p001",
-            "at": "2026-09-15T09:40:00+09:00",
-            "answer": "昨日初めて行ったカフェは静かくて、ずっと座ってました。",
-        }, ensure_ascii=False) + "\n")
+        for aid, pid, days, missing in rows:
+            answer = ANSWERS.get(aid, "…")
+            f.write(json.dumps({
+                "id": aid, "pack_id": pid, "at": when(days),
+                "answer": answer,
+                "analysis": {"missing": missing},
+            }, ensure_ascii=False) + "\n")
+
+    # 첨삭이 도착한 것만 복습 판정에 쓰인다.
+    #
+    # demo-a1 은 첨삭 화면에 쓸 예시다. 나머지는 진도 화면이 보여줄 상태를
+    # 만든다 — p002 는 다시 틀려서 지금 풀 차례이고, p001 은 맞혀서 하루 뒤로
+    # 물러났고, s-ja001 은 다시 답했지만 첨삭이 아직 안 왔다.
+    graded = [
+        SAMPLE_FEEDBACK,
+        {"attempt_id": "demo-a2", "at": when(3, 22), "corrected": "",
+         "notes": [{"span": "降りそうで", "why": "「〜そうなので」가 자연스럽다",
+                    "level": "error"}],
+         "overall": "이유를 잇는 꼴만 손보면 됩니다."},
+        {"attempt_id": "demo-a4", "at": when(1, 22), "corrected": "",
+         "notes": [{"span": "そうなのに", "why": "역접이 아니라 이유다",
+                    "level": "error"}],
+         "overall": "같은 자리에서 한 번 더 걸렸습니다."},
+        {"attempt_id": "demo-a8", "at": when(3, 22), "corrected": "",
+         "notes": [{"span": "조용해서", "why": "「静かで」는 나열이다",
+                    "level": "error"}],
+         "overall": "연결어미 하나만 고치면 됩니다."},
+        {"attempt_id": "demo-a5", "at": when(0, 22), "corrected": "",
+         "notes": [{"span": "長く", "why": "틀리지 않지만 「ずっと」도 쓴다",
+                    "level": "nuance"}],
+         "overall": "이번에는 짚을 것이 없습니다."},
+    ]
     with open(data / "feedback.jsonl", "w") as f:
-        f.write(json.dumps(SAMPLE_FEEDBACK, ensure_ascii=False) + "\n")
+        for fb in graded:
+            f.write(json.dumps(fb, ensure_ascii=False) + "\n")
 
 
 def main():
@@ -354,15 +426,21 @@ def main():
 
             s.send("m")
             s.expect("선택 >>")
-            s.send("2")
+            s.send("4")  # 첨삭 보기
             s.expect("선택 >>")
             pages["05-review"] = s.screen.current_page()
 
             s.send("m")
             s.expect("선택 >>")
-            s.send("4")
+            s.send("5")  # 진도
             s.expect("선택 >>")
-            pages["06-setup"] = s.screen.current_page()
+            pages["06-progress"] = s.screen.current_page()
+
+            s.send("m")
+            s.expect("선택 >>")
+            s.send("7")  # 설정
+            s.expect("선택 >>")
+            pages["07-setup"] = s.screen.current_page()
 
             s.send("")
             s.expect("선택 >>")

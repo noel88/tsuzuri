@@ -47,6 +47,21 @@ func Width(s string) int {
 	return w
 }
 
+// TruncateMark는 Truncate와 같되, 잘렸으면 ".." 를 붙인다.
+//
+// 잘린 표시가 없으면 문장이 이상하게 끝난 것처럼 읽힌다. 「…」(U+2026)를
+// 쓰지 않는 것은 그 문자가 East Asian Ambiguous 라 터미널마다 폭이
+// 달라지기 때문이다 — 그것 때문에 실기에서 줄이 접힌 적이 있다.
+func TruncateMark(s string, max int) string {
+	if Width(s) <= max {
+		return s
+	}
+	if max <= 2 {
+		return Truncate(s, max)
+	}
+	return Truncate(s, max-2) + ".."
+}
+
 // Truncate는 표시폭이 max를 넘지 않도록 문자열을 자른다.
 // 문자 중간에서 자르지 않는다.
 func Truncate(s string, max int) string {

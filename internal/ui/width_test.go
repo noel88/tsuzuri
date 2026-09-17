@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,20 @@ func TestTermWidthRejectsGarbage(t *testing.T) {
 		if got := TermWidth(); got != fallbackWidth {
 			t.Errorf("COLUMNS=%q일 때 TermWidth = %d, 기대 %d", v, got, fallbackWidth)
 		}
+	}
+}
+
+func TestTruncateMarkShowsThatItCut(t *testing.T) {
+	// 잘린 표시가 없으면 문장이 이상하게 끝난 것처럼 읽힌다.
+	got := TruncateMark("어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.", 20)
+	if !strings.HasSuffix(got, "..") {
+		t.Errorf("잘렸는데 표시가 없다: %q", got)
+	}
+	if Width(got) > 20 {
+		t.Errorf("폭 = %d, 20을 넘으면 안 된다: %q", Width(got), got)
+	}
+	// 안 잘리면 그대로 둔다.
+	if got := TruncateMark("짧다", 20); got != "짧다" {
+		t.Errorf("멀쩡한 문자열을 건드렸다: %q", got)
 	}
 }
