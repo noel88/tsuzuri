@@ -464,8 +464,8 @@ func (a *app) fetchPack() error {
 	// 생성이 시작된다.
 	const cancelHint = " (취소는 :q)"
 
-	dir := pack.KoToJa
-	fmt.Fprint(a.out, "\n  방향 [1] 한국어→일본어  [2] 일본어→한국어"+cancelHint+" >> ")
+	dirs := []pack.Direction{pack.KoToJa}
+	fmt.Fprint(a.out, "\n  방향 [1] 한국어→일본어  [2] 일본어→한국어  [3] 둘 다"+cancelHint+" >> ")
 	line, eof, err := ui.ReadLine(a.in)
 	if err != nil {
 		return err
@@ -473,8 +473,11 @@ func (a *app) fetchPack() error {
 	if ui.IsCancel(line) || eof {
 		return a.cancelFetch()
 	}
-	if strings.TrimSpace(line) == "2" {
-		dir = pack.JaToKo
+	switch strings.TrimSpace(line) {
+	case "2":
+		dirs = []pack.Direction{pack.JaToKo}
+	case "3":
+		dirs = []pack.Direction{pack.KoToJa, pack.JaToKo}
 	}
 
 	fmt.Fprintf(a.out, "  레벨 (기본 %s)%s >> ", c.Level, cancelHint)
@@ -501,7 +504,11 @@ func (a *app) fetchPack() error {
 		topic = c.Topic
 	}
 
-	fmt.Fprintf(a.out, "  문항 수 (기본 %d)%s >> ", c.PackSize, cancelHint)
+	sizeLabel := fmt.Sprintf("기본 %d", c.PackSize)
+	if len(dirs) > 1 {
+		sizeLabel += ", 두 방향이 나눠 가집니다"
+	}
+	fmt.Fprintf(a.out, "  문항 수 (%s)%s >> ", sizeLabel, cancelHint)
 	sizeLine, eof, err := ui.ReadLine(a.in)
 	if err != nil {
 		return err
@@ -514,19 +521,55 @@ func (a *app) fetchPack() error {
 		count = n
 	}
 
-	spec := gen.Spec{Dir: dir, Level: strings.TrimSpace(level), Topic: strings.TrimSpace(topic), Count: count}
-	a.notice(fmt.Sprintf("%d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...", count))
+	// 방향을 둘 다 고르면 팩도 둘로 만든다.
+	//
+	// 한 팩에 두 방향을 섞을 수는 없다. 방향마다 다른 사전이 필요한데 한
+	// 프로세스는 사전을 하나만 열 수 있어서(analyzerFor 참고), 문제마다
+	// 방향이 바뀌면 그때마다 사전을 다시 읽어야 한다 — 실기에서 16.5초와
+	// 39초다. 받는 일만 한 번에 끝내고, 푸는 것은 방향별로 한다.
+	for i, dir := range dirs {
+		spec := gen.Spec{
+			Dir:   dir,
+			Level: strings.TrimSpace(level),
+			Topic: strings.TrimSpace(topic),
+			Count: share(count, len(dirs), i),
+		}
+		a.notice(fmt.Sprintf("%s %d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...",
+			dirLabel(dir), spec.Count))
 
-	ps, err := gen.Generate(context.Background(), client, spec)
-	if err != nil {
-		return err
+		ps, err := gen.Generate(context.Background(), client, spec)
+		if err != nil {
+			// 앞의 방향이 이미 저장됐으면 그것은 남는다. 두 번째가 실패했다고
+			// 첫 번째까지 버리면 그 호출은 이미 과금된 뒤다.
+			return err
+		}
+		path, err := gen.WritePack(filepath.Join(a.dataDir, "packs"), spec, ps, time.Now())
+		if err != nil {
+			return err
+		}
+		a.notice(fmt.Sprintf("%d문항을 받았습니다: %s", len(ps), filepath.Base(path)))
 	}
-	path, err := gen.WritePack(filepath.Join(a.dataDir, "packs"), spec, ps, time.Now())
-	if err != nil {
-		return err
-	}
-	a.notice(fmt.Sprintf("%d문항을 받았습니다: %s", len(ps), filepath.Base(path)))
 	return nil
+}
+
+// share는 총 문항 수를 방향 수만큼 나눈다. 나머지는 앞쪽이 가진다.
+// 방향마다 최소 한 문항은 준다 — 0문항짜리 호출은 돈만 쓰고 빈 팩을 만든다.
+func share(total, parts, i int) int {
+	n := total / parts
+	if i < total%parts {
+		n++
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+func dirLabel(d pack.Direction) string {
+	if d == pack.JaToKo {
+		return "일→한"
+	}
+	return "한→일"
 }
 
 // cancelFetch는 팩 받기를 취소한다. 과금되는 호출은 일어나지 않는다.

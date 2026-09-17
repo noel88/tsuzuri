@@ -71,3 +71,18 @@ func TestPackSetKeysAreContiguous(t *testing.T) {
 		}
 	}
 }
+
+func TestShareSplitsCountAcrossDirections(t *testing.T) {
+	// 홀수는 앞쪽이 하나 더 가진다.
+	if got := []int{share(9, 2, 0), share(9, 2, 1)}; got[0] != 5 || got[1] != 4 {
+		t.Errorf("9문항을 둘로 = %v, 기대 [5 4]", got)
+	}
+	// 한 방향이면 그대로 간다.
+	if got := share(50, 1, 0); got != 50 {
+		t.Errorf("share = %d, 기대 50", got)
+	}
+	// 0문항짜리 호출은 돈만 쓰고 빈 팩을 만든다.
+	if got := share(1, 2, 1); got != 1 {
+		t.Errorf("share = %d, 최소 한 문항은 줘야 한다", got)
+	}
+}
