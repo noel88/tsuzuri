@@ -90,17 +90,49 @@ func lastMeaningful(tokens []Token) (Token, bool) {
 // 「니다」와 「니까」는 「입니다」「갔습니까」처럼 어간과 붙은 토큰까지
 // 잡기 위한 것이다. 「하니까」 같은 연결어미와 겹치지 않도록, 어미를 달고
 // 있는 마지막 토큰에만 적용한다.
-var koreanPoliteEndings = []string{
-	"요", "니다", "니까", "ㅂ니다", "ᄇ니다", "십시오", "세요", "ㅂ시다",
-}
+var koreanPoliteEndings = []string{"요", "십시오", "세요"}
 
+// 「ㅂ니다」「ㅂ시다」꼴을 잡을 때 앞 음절에서 찾는 종성.
+const jongseongBieup = 17 // ᆸ
+
+// isKoreanPolite는 어미 표층이 정중체인지 본다.
+//
+// 「갑시다」의 「ㅂ」은 앞 음절 「갑」에 합쳐져 있어서 글자로는 못 찾는다.
+// 한글 음절을 풀어 종성을 직접 본다 — 그러지 않으면 정중체로 제대로 답한
+// 학습자가 문체 어긋남 지적을 받는다.
+//
+// 「니다」「니까」를 그냥 받으면 안 된다. 「그렇다니까」 같은 반말이 정중체로
+// 잡힌다. 앞이 「습」이거나 종성이 ㅂ일 때만 정중체다.
 func isKoreanPolite(surface string) bool {
 	for _, suf := range koreanPoliteEndings {
 		if strings.HasSuffix(surface, suf) {
 			return true
 		}
 	}
+	for _, suf := range []string{"니다", "니까", "시다"} {
+		if !strings.HasSuffix(surface, suf) {
+			continue
+		}
+		head := []rune(strings.TrimSuffix(surface, suf))
+		if len(head) == 0 {
+			continue
+		}
+		switch last := head[len(head)-1]; {
+		case last == '습':
+			return true
+		case jongseong(last) == jongseongBieup:
+			return true
+		}
+	}
 	return false
+}
+
+// jongseong은 한글 음절의 종성 번호를 돌려준다. 음절이 아니면 -1이다.
+func jongseong(r rune) int {
+	if r < 0xAC00 || r > 0xD7A3 {
+		return -1
+	}
+	return int(r-0xAC00) % 28
 }
 
 // StyleMismatch는 답안의 문체가 문제가 요구한 문체와 어긋나는지 본다.

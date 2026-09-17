@@ -59,7 +59,15 @@ func matches(needle string, bases, surfaces map[string]bool, flat, tight string)
 	}
 	// 사전형으로 적힌 핵심 표현은 어미를 떼고 어간으로 본다.
 	if stem := dictionaryStem(needle); stem != "" {
-		if bases[stem] || strings.Contains(tight, squeeze(stem)) {
+		if bases[stem] {
+			return true
+		}
+		// 글자로 찾는 것은 어간이 두 글자 이상일 때만 한다.
+		//
+		// 한 글자 어간은 아무 문장에나 걸린다. 「사다」의 「사」가 「사진」에,
+		// 「오다」의 「오」가 「오늘」에 걸려서, 쓰지도 않은 표현을 썼다고
+		// 알려 줬다. 형태소로 찾은 것(bases)은 그런 일이 없다.
+		if len([]rune(stem)) >= 2 && strings.Contains(tight, squeeze(stem)) {
 			return true
 		}
 	}

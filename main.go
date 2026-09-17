@@ -878,7 +878,7 @@ func (a *app) fetchPack() error {
 		a.notice(fmt.Sprintf("%s %d문항을 만드는 중입니다. 몇 분 걸릴 수 있습니다...",
 			dirLabel(dir), spec.Count))
 
-		ps, err := gen.Generate(context.Background(), client, spec)
+		ps, bad, err := gen.Generate(context.Background(), client, spec)
 		if err != nil {
 			// 앞의 방향이 이미 저장됐으면 그것은 남는다. 두 번째가 실패했다고
 			// 첫 번째까지 버리면 그 호출은 이미 과금된 뒤다.
@@ -888,8 +888,14 @@ func (a *app) fetchPack() error {
 		if err != nil {
 			return err
 		}
-		a.notice(fmt.Sprintf("%d문항을 받았습니다 (%s): %s",
-			len(ps), lengthSummary(ps), filepath.Base(path)))
+		msg := fmt.Sprintf("%d문항을 받았습니다 (%s): %s",
+			len(ps), lengthSummary(ps), filepath.Base(path))
+		if len(bad) > 0 {
+			// 요청한 수보다 적게 받았으면 왜 그런지 알려야 한다. 모르면
+			// 같은 금액을 또 쓰면서 같은 일이 반복된다.
+			msg += fmt.Sprintf("\n  %d개는 버리거나 고쳤습니다: %s", len(bad), strings.Join(bad, ", "))
+		}
+		a.notice(msg)
 	}
 	return nil
 }
@@ -959,6 +965,12 @@ func (a *app) fetchFeedback() error {
 		a.notice(fmt.Sprintf("%d건의 첨삭을 받았습니다. 4번에서 볼 수 있습니다.", res.Processed))
 	case res.Failed == 0 && res.Missing == 0:
 		a.notice("처리할 항목이 없습니다.")
+	}
+	if res.Orphaned > 0 {
+		a.notice(fmt.Sprintf("%d건은 답안을 찾지 못해 큐에서 뺐습니다. 그 답안은 사라졌습니다.", res.Orphaned))
+	}
+	if res.Dropped > 0 {
+		a.notice(fmt.Sprintf("%d건은 다시 보내도 같을 실패라 큐에서 뺐습니다.\n  %s", res.Dropped, res.LastError))
 	}
 	if res.Failed > 0 {
 		msg := fmt.Sprintf("%d건은 실패해 큐에 남겼습니다. 다시 시도하면 됩니다.", res.Failed)

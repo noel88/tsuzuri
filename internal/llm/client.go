@@ -25,6 +25,11 @@ type Request struct {
 	Schema    map[string]any // JSON Schema의 properties
 	Required  []string
 	MaxTokens int64
+
+	// TruncHint는 응답이 토큰 한도에서 잘렸을 때 사용자에게 줄 실마리다.
+	// 무엇을 줄여야 하는지는 부르는 쪽만 안다 — 팩 생성이면 문항 수이고
+	// 첨삭이면 답안 길이다.
+	TruncHint string
 }
 
 // Client는 네트워크를 아는 유일한 인터페이스다.
@@ -113,6 +118,14 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 			anthropic.NewUserMessage(anthropic.NewTextBlock(req.User)),
 		},
 		Tools: []anthropic.ToolUnionParam{{OfTool: &tool}},
+		// 툴을 반드시 쓰게 한다.
+		//
+		// 강제하지 않으면 모델이 산문으로 답하는 길이 열려 있고, 그러면
+		// 구조화된 응답을 못 받아 그 호출이 통째로 버려진다. 값은 이미
+		// 치른 뒤다.
+		ToolChoice: anthropic.ToolChoiceUnionParam{
+			OfTool: &anthropic.ToolChoiceToolParam{Name: req.ToolName},
+		},
 	}
 	// 적응형 사고를 지원하지 않는 모델에 보내면 400으로 거절당해
 	// 온라인 기능이 통째로 막힌다.
@@ -146,7 +159,7 @@ func (a *anthropicClient) Complete(ctx context.Context, req Request) (string, er
 		return "", err
 	}
 
-	return extractJSON(msg)
+	return extractJSON(msg, req.TruncHint)
 }
 
 // watchStall은 beat가 timeout 동안 오지 않으면 호출을 끊는다.
@@ -174,15 +187,20 @@ func watchStall(ctx context.Context, beat <-chan struct{}, cancel context.Cancel
 
 // extractJSON은 응답에서 구조화된 결과를 꺼낸다.
 // 툴 호출이 정상 경로이고, 모델이 텍스트로 답한 경우를 대비책으로 둔다.
-func extractJSON(msg anthropic.Message) (string, error) {
+func extractJSON(msg anthropic.Message, hint string) (string, error) {
+	// 잘림 검사를 블록 루프 밖에서 먼저 한다.
+	//
+	// 툴 블록이 시작되기도 전에 한도를 다 쓰면 — 생각 단계가 길면 그렇게
+	// 된다 — 루프 안에 두었을 때는 이 검사에 닿지 못하고 「구조화된 응답을
+	// 받지 못했습니다」가 나갔다. 사용자는 무엇을 줄여야 할지 알 실마리를
+	// 못 받고 같은 금액을 다시 쓴다.
+	if truncated(msg) {
+		return "", fmt.Errorf("응답이 토큰 한도에서 잘렸습니다. %s", hint)
+	}
 	for _, block := range msg.Content {
 		v, ok := block.AsAny().(anthropic.ToolUseBlock)
 		if !ok {
 			continue
-		}
-		if truncated(msg) {
-			return "", fmt.Errorf(
-				"응답이 토큰 한도에서 잘렸습니다. 팩 크기를 줄여 보세요 (설정 5번)")
 		}
 		raw := v.JSON.Input.Raw()
 		// 스트림이 도중에 끊기면 SDK가 덜 받은 입력을 "{}"로 되돌린다.

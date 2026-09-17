@@ -112,6 +112,7 @@ type Result struct {
 	Failed    int    // 일시적 실패로 큐에 남긴 건수
 	Missing   int    // 문제를 찾지 못해 큐에 남긴 건수
 	Dropped   int    // 다시 시도해도 같을 실패라 큐에서 뺀 건수
+	Orphaned  int    // 답안을 찾지 못해 큐에서 버린 건수
 	Aborted   bool   // 연속 실패로 중단했는지
 	LastError string // 마지막 실패 사유. 없으면 빈 문자열
 }
@@ -146,7 +147,6 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		now = time.Now
 	}
 	queuePath := filepath.Join(dataDir, "queue.jsonl")
-	feedbackPath := filepath.Join(dataDir, "feedback.jsonl")
 
 	queue, err := store.ReadAll[store.QueueItem](queuePath)
 	if err != nil {
@@ -165,7 +165,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		byID[a.ID] = a
 	}
 
-	done, err := store.ReadAll[Feedback](feedbackPath)
+	done, err := loadFeedback(dataDir)
 	if err != nil {
 		return Result{}, err
 	}
@@ -203,7 +203,7 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		return pending[i].Priority && !pending[j].Priority
 	})
 
-	processed, missing, dropped := 0, 0, 0
+	processed, missing, dropped, orphaned := 0, 0, 0, 0
 	consecutive := 0
 	aborted := false
 	lastErr := ""
@@ -217,6 +217,11 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 		a, ok := byID[q.AttemptID]
 		if !ok {
 			// 답안 자체가 없으면 첨삭할 대상이 없다. 큐에서 버린다.
+			//
+			// 세어서 알린다. attempts.jsonl의 잘린 줄이 버려진 뒤라면 그
+			// 답안은 사라진 것인데, 조용히 넘기면 사용자는 「처리할 항목이
+			// 없습니다」만 보고 답안이 없어진 것을 모른다.
+			orphaned++
 			continue
 		}
 		p, ok := problems[a.PackID]
@@ -235,7 +240,16 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 			if permanent(err) {
 				// 다시 보내도 같은 곳에서 같은 금액을 잃는다. 큐에서 뺀다.
 				dropped++
-				consecutive = 0
+				// 연속 실패 수를 0으로 되돌리면 안 된다.
+				//
+				// 영구 실패가 모델 이름이나 설정 때문이면 다음 건도 똑같이
+				// 실패한다. 그런데 0으로 되돌리면 중단 장치가 영영 안 걸려,
+				// 큐에 60건이 쌓여 있으면 60번을 호출하고 60건을 전부
+				// 청구받고 60건을 전부 잃는다.
+				consecutive++
+				if consecutive >= maxConsecutiveFailures {
+					aborted = true
+				}
 				continue
 			}
 			// 일시적 실패는 큐에 남긴다. 네트워크가 한 번 흔들렸다고
@@ -248,24 +262,67 @@ func Run(ctx context.Context, c llm.Client, dataDir string, now func() time.Time
 			continue
 		}
 		consecutive = 0
-		if err := store.Append(feedbackPath, fb); err != nil {
-			return Result{Processed: processed}, err
+		if err := saveFeedback(dataDir, fb); err != nil {
+			// 이미 값을 치른 결과다. 여기서 버리면 다음 sync가 같은
+			// 답안을 다시 보내 두 번 청구받는다.
+			return Result{Processed: processed, Orphaned: orphaned}, err
 		}
 		processed++
 	}
 
 	res := Result{
 		Processed: processed,
+		Orphaned:  orphaned,
 		Failed:    len(failed) - missing,
 		Missing:   missing,
 		Dropped:   dropped,
 		Aborted:   aborted,
 		LastError: lastErr,
 	}
+	// 바뀐 것이 없으면 큐를 건드리지 않는다. 네트워크가 없어 3번 만에
+	// 중단한 run도 예전에는 큐를 통째로 다시 썼다 — 잃을 이유가 없는
+	// 자리에서 잃을 기회를 만드는 셈이다.
+	if sameQueue(queue, failed) {
+		return res, nil
+	}
 	if err := rewriteQueue(queuePath, failed); err != nil {
 		return res, err
 	}
 	return res, nil
+}
+
+// recoverName은 본 파일에 못 썼을 때 첨삭을 담아 두는 파일이다.
+const recoverName = "feedback-recover.jsonl"
+
+// saveFeedback은 받은 첨삭을 저장한다. 본 파일이 막히면 보조 파일에 쓴다.
+//
+// 이미 값을 치른 결과다. SD카드가 꽉 찼거나 쓰기가 막히면 — 이 기기에서
+// 드물지 않다 — 그 결과가 메모리에서 사라지고, 다음 sync가 같은 답안을
+// 다시 보내 두 번 청구받는다. 보조 파일에라도 남으면 잃지 않는다.
+func saveFeedback(dataDir string, fb Feedback) error {
+	err := store.Append(filepath.Join(dataDir, "feedback.jsonl"), fb)
+	if err == nil {
+		return nil
+	}
+	if err2 := store.Append(filepath.Join(dataDir, recoverName), fb); err2 != nil {
+		return err
+	}
+	return fmt.Errorf("첨삭을 feedback.jsonl에 쓰지 못해 %s에 남겼습니다. 값은 이미 치렀으니 "+
+		"그 파일을 feedback.jsonl에 이어 붙이면 됩니다: %w", recoverName, err)
+}
+
+// loadFeedback은 이미 받아 둔 첨삭을 전부 읽는다. 보조 파일도 함께 본다 —
+// 그러지 않으면 거기 있는 답안을 다시 보내 두 번 청구받는다.
+func loadFeedback(dataDir string) ([]Feedback, error) {
+	out, err := store.ReadAll[Feedback](filepath.Join(dataDir, "feedback.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	rec, err := store.ReadAll[Feedback](filepath.Join(dataDir, recoverName))
+	if err != nil {
+		return nil, err
+	}
+	return append(out, rec...), nil
 }
 
 func review(ctx context.Context, c llm.Client, p pack.Problem, a store.Attempt, at time.Time) (Feedback, error) {
@@ -274,13 +331,16 @@ func review(ctx context.Context, c llm.Client, p pack.Problem, a store.Attempt, 
 		p.Dir, p.Level, p.Style, p.Prompt, p.Reference, a.Answer)
 
 	raw, err := c.Complete(ctx, llm.Request{
-		System:    systemPrompt,
-		User:      user,
-		ToolName:  "emit_feedback",
-		ToolDesc:  "학습자의 답안에 대한 첨삭을 제출합니다.",
-		Schema:    feedbackSchema,
-		Required:  []string{"corrected", "notes", "overall"},
+		System:   systemPrompt,
+		User:     user,
+		ToolName: "emit_feedback",
+		ToolDesc: "학습자의 답안에 대한 첨삭을 제출합니다.",
+		Schema:   feedbackSchema,
+		// 엄격 스키마는 최상위 속성이 전부 required 여야 한다. 속성을
+		// 더하고 이 줄을 안 고치면 400으로 첨삭이 통째로 막힌다.
+		Required:  []string{"corrected", "notes", "good", "overall"},
 		MaxTokens: 16000,
+		TruncHint: "답안이 매우 길면 한 번에 다 첨삭하지 못할 수 있습니다.",
 	})
 	if err != nil {
 		return Feedback{}, err
@@ -317,15 +377,48 @@ func rewriteQueue(path string, remaining []store.QueueItem) error {
 	for _, q := range remaining {
 		if err := enc.Encode(q); err != nil {
 			f.Close()
+			os.Remove(tmp)
 			return err
 		}
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
+		os.Remove(tmp)
 		return err
 	}
 	if err := f.Close(); err != nil {
+		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	// 이름 바꾸기까지 디스크에 내린다.
+	//
+	// 파일 내용은 Sync로 내려갔지만 디렉터리 항목은 아직 아니다. 포메라의
+	// 데이터는 vfat SD카드에 놓이는데 vfat에는 저널이 없어서, 이름을 바꾸는
+	// 도중에 전원이 끊기면 두 이름이 다 사라질 수 있다. 큐가 통째로 날아가면
+	// 답안은 남아도 다시 첨삭받을 길이 없다.
+	//
+	// 디렉터리를 열지 못하는 파일 시스템이 있으므로 실패는 넘긴다.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
+}
+
+// sameQueue는 큐가 그대로인지 본다.
+// 바뀐 것이 없으면 다시 쓰지 않는다 — 쓰지 않으면 잃을 일도 없다.
+func sameQueue(a, b []store.QueueItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
