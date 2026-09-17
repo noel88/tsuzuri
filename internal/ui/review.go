@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/noel88/tsuzuri/internal/pack"
 	"github.com/noel88/tsuzuri/internal/store"
 	tsync "github.com/noel88/tsuzuri/internal/sync"
@@ -39,7 +41,7 @@ func RenderFeedback(p pack.Problem, a store.Attempt, f tsync.Feedback, st Status
 	lines = append(lines, "")
 	lines = append(lines, CommandBarWith(
 		"첨삭",
-		"주요명령(다음 ⏎)  메뉴(M)  종료(X)",
+		"주요명령(다음 ⏎, 넘기기 위아래)  메뉴(M)  종료(X)",
 		"선택 >>", w)...)
 
 	return Page(lines, termW, w)
@@ -47,6 +49,10 @@ func RenderFeedback(p pack.Problem, a store.Attempt, f tsync.Feedback, st Status
 
 // feedbackNotes는 error를 먼저, nuance를 나중에 그린다.
 // 표식도 다르다 — ✗는 틀린 것, ·는 더 나은 선택의 제안이다.
+//
+// 지적 하나가 여러 줄이 된다. 무엇이 틀렸는지만 알려 주면 다음에 또 같은
+// 자리에서 걸리므로, 까닭을 함께 읽게 한다. 고친 꼴은 따로 한 줄로 띄워
+// 눈에 먼저 들어오게 한다.
 func feedbackNotes(f tsync.Feedback, inner int) []string {
 	var out []string
 	for _, lv := range []string{tsync.LevelError, tsync.LevelNuance} {
@@ -58,8 +64,22 @@ func feedbackNotes(f tsync.Feedback, inner int) []string {
 			if lv == tsync.LevelNuance {
 				mark = "·"
 			}
-			out = append(out, wrapIndent(mark+" 「"+n.Span+"」   "+n.Why, inner, "  ")...)
+			if len(out) > 0 {
+				out = append(out, "")
+			}
+			out = append(out, wrapIndent(mark+" 「"+n.Span+"」", inner, "  ")...)
+			if n.Fix != "" {
+				out = append(out, wrapIndent("→ 「"+n.Fix+"」", inner-4, "      ")...)
+			}
+			out = append(out, wrapIndent(n.Why, inner-4, "      ")...)
 		}
+	}
+	if len(f.Good) > 0 {
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		// 맞은 것도 짚는다. 틀린 것만 돌려주면 무엇을 유지해야 할지 모른다.
+		out = append(out, wrapIndent("✓ 잘 쓴 것: 「"+strings.Join(f.Good, "」  「")+"」", inner, "  ")...)
 	}
 	return out
 }

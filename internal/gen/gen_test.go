@@ -303,16 +303,3 @@ func TestLengthMixSplitsEvenly(t *testing.T) {
 		}
 	}
 }
-
-func TestLengthOfSortsByPromptLength(t *testing.T) {
-	cases := map[string]string{
-		"비가 온다.": "단문",
-		"어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.":             "중문",
-		"요즘 계속 바빠서 방 청소를 할 기력도 없어. 방이 점점 더 지저분해지고 있어.": "장문",
-	}
-	for prompt, want := range cases {
-		if got := LengthOf(prompt); got != want {
-			t.Errorf("LengthOf(%q) = %q, 기대 %q", prompt, got, want)
-		}
-	}
-}

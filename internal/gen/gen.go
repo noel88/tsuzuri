@@ -32,16 +32,18 @@ const systemPrompt = `당신은 한국어 화자를 위한 일본어 작문 학�
 - 제시문은 학습자가 실제로 쓸 법한 자연스러운 문장이어야 합니다.
   교과서 예문 같은 인공적인 문장은 피하세요.
 - **길이를 섞으세요.** 비슷한 길이만 나오면 같은 종류의 연습만 반복됩니다.
-  아래 셋을 대략 같은 수로 내세요.
-    단문 — 절 하나. 짧게 끊어 말하는 문장. (예: "비가 올 것 같아서 우산을
-      가져왔습니다.")
-    중문 — 절 두 개가 이어진 문장. 이유·조건·역접 같은 연결이 하나 있습니다.
-      (예: "어제 처음 간 카페가 생각보다 조용해서 오래 앉아 있었다.")
-    장문 — 두 문장이거나, 절이 셋 이상 얽힌 문장. 앞뒤 문맥이 이어져야
-      합니다. (예: "요즘 계속 바빠서 방 청소를 할 기력도 없어. 방이 점점 더
-      지저분해지고 있어.")
+  아래 셋을 요청한 개수만큼 내세요.
+    단문 — 한 문장. 60자 안쪽. (예: "비가 올 것 같아서 우산을 가져왔습니다.")
+    중문 — 두세 문장. 100~300자. 이유·조건·역접이 이어지고 앞뒤 문장이
+      서로를 받습니다.
+    장문 — 대여섯 문장 이상의 한 문단. 400~1200자. 하나의 이야기나 설명이
+      끝까지 이어져야 합니다. 문장을 나열하지 말고, 지시어·접속·시제로
+      앞뒤가 묶이게 쓰세요. 번역할 때 문단 전체의 흐름을 지켜야 하는 것이
+      이 갈래의 연습입니다.
   길이는 문항 수를 채우려고 늘리는 것이 아닙니다. 긴 문항은 긴 만큼
   연결·시제·문맥을 다루게 하세요.
+  장문의 key_points는 문단 전체에서 고르되 4개를 넘기지 마세요.
+
 - reference는 **유일한 정답이 아니라 모범 예시 하나**입니다. 학습자가
   다른 표현으로 같은 뜻을 쓸 수 있다는 전제로 작성하세요.
 - key_points는 **reference 안에 글자 그대로 들어 있는 짧은 표현** 2~4개입니다.
@@ -104,21 +106,6 @@ func lengthMix(count int) (short, mid, long int) {
 	return short, mid, long
 }
 
-// LengthOf는 제시문이 어느 길이인지 본다. 받은 팩의 배분을 알리는 데 쓴다.
-//
-// 글자 수로 가른다. 절을 세려면 형태소 분석이 필요한데, 팩을 받는 시점에는
-// 사전이 올라와 있지 않을 수 있고 그것을 위해 사전을 읽는 것은 수십 초다.
-func LengthOf(prompt string) string {
-	switch n := len([]rune(prompt)); {
-	case n <= 20:
-		return "단문"
-	case n <= 40:
-		return "중문"
-	default:
-		return "장문"
-	}
-}
-
 // Generate는 문제 팩을 만든다.
 func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error) {
 	if s.Count <= 0 {
@@ -138,7 +125,7 @@ func Generate(ctx context.Context, c llm.Client, s Spec) ([]pack.Problem, error)
 		ToolDesc:  "생성한 문장 쌍 목록을 제출합니다.",
 		Schema:    problemSchema,
 		Required:  []string{"problems"},
-		MaxTokens: 32000,
+		MaxTokens: 64000,
 	})
 	if err != nil {
 		return nil, err

@@ -50,6 +50,40 @@ type Problem struct {
 	Style     Style     `json:"style"`
 }
 
+// 길이 갈래. 한 팩 안에 셋이 섞여 있어야 같은 연습만 반복되지 않는다.
+const (
+	LenShort  = "단문" // 한 문장
+	LenMedium = "중문" // 두어 문장
+	LenLong   = "장문" // 문단 하나
+)
+
+// 길이를 가르는 선 (제시문의 글자 수).
+//
+// 포메라 화면은 한 줄에 한글 약 60자다. 단문은 한 줄, 중문은 다섯 줄,
+// 장문은 스무 줄 안쪽이라는 감각을 글자 수로 옮긴 것이다. 문장 수로 세지
+// 않는 것은 팩을 읽을 때마다 문장을 갈라야 하고, 마침표 하나로 갈래가
+// 바뀌는 것이 오히려 덜 정확해서다.
+const (
+	shortMax  = 60
+	mediumMax = 300
+)
+
+// LengthOf는 제시문이 어느 갈래인지 본다.
+func LengthOf(prompt string) string {
+	switch n := len([]rune(prompt)); {
+	case n <= shortMax:
+		return LenShort
+	case n <= mediumMax:
+		return LenMedium
+	default:
+		return LenLong
+	}
+}
+
+// IsLong은 한 줄로 답하기 어려운 문항인지 본다.
+// 그런 문항은 답 자리에서 바로 에디터를 연다.
+func (p Problem) IsLong() bool { return LengthOf(p.Prompt) == LenLong }
+
 // NormalizeLevel은 "2"처럼 N을 뺀 레벨을 "N2"로 고친다.
 //
 // 레벨은 자유 문자열이라 무엇이든 받지만, 그 값이 그대로 생성 프롬프트에
