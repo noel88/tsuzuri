@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/noel88/tsuzuri/internal/config"
+	"github.com/noel88/tsuzuri/internal/pack"
 )
 
 func newAppFor(t *testing.T, dir, input string) (*app, *bytes.Buffer) {
@@ -104,5 +105,31 @@ func TestSetupSavesRealChange(t *testing.T) {
 	}
 	if got.Level != "N1" {
 		t.Errorf("바뀐 값은 저장되어야 한다: %q", got.Level)
+	}
+}
+
+// 사전 로딩은 실기에서 수십 초가 걸린다. 얼마나 걸릴지 미리 알리지 않으면
+// 화면이 멈춘 것으로 오해한다.
+func TestLoadDictionaryShowsEstimateAndElapsed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("사전을 실제로 읽는다")
+	}
+	a, out := newAppFor(t, t.TempDir(), "")
+	if _, err := a.loadDictionary(pack.KoToJa); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	for _, want := range []string{"사전을 읽는 중", "ko2ja", "약 17초", "완료"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("출력에 %q가 없다:\n%s", want, s)
+		}
+	}
+}
+
+func TestDictLoadEstimateCoversBothDirections(t *testing.T) {
+	for _, d := range []pack.Direction{pack.KoToJa, pack.JaToKo} {
+		if dictLoadEstimate[d] <= 0 {
+			t.Errorf("%s의 예상 시간이 없다", d)
+		}
 	}
 }
